@@ -1,0 +1,6 @@
+component:
+  name: Husi
+  slug: husi
+  project: husi
+  filemask: composeApp/src/commonMain/composeResources/values-*/strings.xml
+  template: composeApp/src/commonMain/composeResources/values/strings.xml

@@ -1,0 +1,237 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard",
+    ":semanticCommitTypeAll(chore)"
+  ],
+  "semanticCommits": "enabled",
+  "labels": [
+    "dependencies"
+  ],
+  "git-submodules": {
+    "enabled": false
+  },
+  "gradle": {
+    "managerFilePatterns": [
+      "/(^|/)build.gradle.kts$/",
+      "/(^|/)settings.gradle.kts$/",
+      "/(^|/)gradle/libs\\.versions\\.toml$/"
+    ]
+  },
+  "gomod": {
+    "managerFilePatterns": [
+      "/libcore/go.mod$/"
+    ]
+  },
+  "github-actions": {
+    "managerFilePatterns": [
+      "/.github/workflows/.*.yml$/"
+    ]
+  },
+  "packageRules": [
+    {
+      "matchManagers": [
+        "github-actions"
+      ],
+      "semanticCommitType": "ci",
+      "addLabels": [
+        "github_action"
+      ]
+    },
+    {
+      "matchManagers": [
+        "gomod"
+      ],
+      "enabled": false
+    },
+    {
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchPackageNames": [
+        "github.com/sagernet/sing-box",
+        "github.com/exclavenetwork/sing-juicity",
+        "github.com/xchacha20-poly1305/TLS-scribe",
+        "github.com/xchacha20-poly1305/anchor",
+        "github.com/xchacha20-poly1305/anja",
+        "github.com/xchacha20-poly1305/libping",
+        "github.com/xchacha20-poly1305/sing-trusttunnel"
+      ],
+      "enabled": true,
+      "postUpdateOptions": [
+        "gomodTidy"
+      ],
+      "addLabels": [
+        "go"
+      ]
+    },
+    {
+      "matchManagers": [
+        "gradle"
+      ],
+      "addLabels": [
+        "java"
+      ]
+    },
+    {
+      "matchManagers": [
+        "gradle"
+      ],
+      "matchPackageNames": [
+        "com.google.devtools.ksp",
+        "org.jetbrains.kotlin{/,}**",
+        "org.jetbrains.kotlinx{/,}**"
+      ],
+      "groupName": "Kotlin Ecosystem",
+      "groupSlug": "kotlin-ecosystem"
+    },
+    {
+      "matchManagers": [
+        "gradle"
+      ],
+      "groupName": "AndroidX Architecture & Data",
+      "groupSlug": "androidx-arch",
+      "matchPackageNames": [
+        "androidx.work{/,}**",
+        "androidx.datastore{/,}**",
+        "androidx.room{/,}**",
+        "androidx.sqlite{/,}**"
+      ]
+    },
+    {
+      "matchManagers": [
+        "gradle"
+      ],
+      "groupName": "AndroidX Core & UI",
+      "groupSlug": "androidx-core-ui",
+      "matchPackageNames": [
+        "androidx.core{/,}**",
+        "androidx.appcompat{/,}**",
+        "androidx.activity{/,}**",
+        "androidx.browser{/,}**",
+        "androidx.lifecycle{/,}**",
+        "androidx.camera{/,}**",
+        "androidx.tv{/,}**"
+      ]
+    },
+    {
+      "matchManagers": [
+        "gradle"
+      ],
+      "matchPackageNames": [
+        "androidx.activity:activity-compose",
+        "androidx.lifecycle:lifecycle-runtime-compose",
+        "androidx.lifecycle:lifecycle-viewmodel-compose",
+        "androidx.navigation:navigation-compose",
+        "androidx.compose{/,}**",
+        "org.jetbrains.compose{/,}**",
+        "org.jetbrains.androidx{/,}**",
+        "com.google.accompanist{/,}**",
+        "me.zhanghai.compose.preference{/,}**",
+        "io.github.oikvpqya.compose.fastscroller{/,}**",
+        "io.github.vinceglb{/,}**"
+      ],
+      "groupName": "Compose Ecosystem",
+      "groupSlug": "compose-ecosystem"
+    },
+    {
+      "matchManagers": [
+        "gradle"
+      ],
+      "matchPackageNames": [
+        "com.esotericsoftware:kryo",
+        "com.jakewharton:process-phoenix",
+        "org.ini4j:ini4j",
+        "com.github.ajalt.clikt{/,}**"
+      ],
+      "groupName": "Utility Libraries",
+      "groupSlug": "utility-libraries"
+    },
+    {
+      "matchManagers": [
+        "gradle"
+      ],
+      "matchPackageNames": [
+        "org.gradle.toolchains.foojay-resolver-convention",
+        "com.mikepenz{/,}**"
+      ],
+      "groupName": "Build Plugins & Tooling",
+      "groupSlug": "build-plugins-tooling"
+    },
+    {
+      "matchManagers": [
+        "gradle"
+      ],
+      "groupName": "Testing",
+      "groupSlug": "testing",
+      "matchPackageNames": [
+        "org.junit{/,}**",
+        "io.mockk{/,}**"
+      ]
+    },
+    {
+      "matchManagers": [
+        "gradle"
+      ],
+      "groupName": "Koin",
+      "groupSlug": "koin",
+      "matchPackageNames": [
+        "io.insert-koin{/,}**"
+      ]
+    },
+    {
+      "matchManagers": [
+        "gradle"
+      ],
+      "groupName": "Desktop Native Integration",
+      "groupSlug": "desktop-native-integration",
+      "matchPackageNames": [
+        "io.github.kdroidfilter{/,}**",
+        "com.github.hypfvieh{/,}**",
+        "net.java.dev.jna{/,}**"
+      ]
+    },
+    {
+      "matchManagers": [
+        "gradle"
+      ],
+      "groupName": "Google & Android Tools",
+      "groupSlug": "google-android-tools",
+      "matchPackageNames": [
+        "com.google.{/,}**",
+        "com.android.{/,}**"
+      ]
+    },
+    {
+      "matchPackageNames": [
+        "/.*/"
+      ],
+      "allowedVersions": "!/.*-[Ss][Nn][Aa][Pp][Ss][Hh][Oo][Tt](\\+.*)?$/"
+    },
+    {
+      "matchPackageNames": [
+        "com.google.guava:guava"
+      ],
+      "allowedVersions": "/-android$/"
+    },
+    {
+      "matchManagers": [
+        "gradle"
+      ],
+      "matchPackageNames": [
+        "org.jetbrains.compose**"
+      ],
+      "allowedVersions": "!/(-[Ss][Nn][Aa][Pp][Ss][Hh][Oo][Tt](\\+.*)?|\\+dev\\d+)$/"
+    },
+    {
+      "matchManagers": [
+        "gradle"
+      ],
+      "matchPackageNames": [
+        "org.jetbrains.kotlinx:kotlinx-datetime"
+      ],
+      "allowedVersions": "!/(-[Ss][Nn][Aa][Pp][Ss][Hh][Oo][Tt](\\+.*)?|-compat)$/"
+    }
+  ]
+}
