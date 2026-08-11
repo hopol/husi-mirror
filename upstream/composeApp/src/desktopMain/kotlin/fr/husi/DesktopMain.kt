@@ -10,7 +10,6 @@ import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastCoerceIn
 import androidx.compose.ui.window.Window
-import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.ProgramResult
@@ -26,12 +25,17 @@ import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.types.file
 import com.github.ajalt.clikt.parameters.types.int
 import com.github.ajalt.clikt.parameters.types.restrictTo
-import com.kdroid.composetray.menu.api.KeyShortcut
-import com.kdroid.composetray.tray.api.Tray
+import dev.nucleusframework.application.NucleusBackend
+import dev.nucleusframework.application.nucleusApplication
+import dev.nucleusframework.composenativetray.menu.api.KeyShortcut
+import dev.nucleusframework.composenativetray.tray.api.Tray
+import dev.nucleusframework.core.runtime.SingleInstanceManager
 import fr.husi.bg.BackendState
 import fr.husi.bg.DeepLinkDispatcher
+import fr.husi.bg.DesktopNotificationCenter
 import fr.husi.bg.DesktopTaskRegistry
 import fr.husi.bg.DesktopTaskScheduler
+import fr.husi.bg.InstanceRestoreBus
 import fr.husi.bg.RouteAssetUpdater
 import fr.husi.bg.ServiceState
 import fr.husi.bg.SubscriptionUpdater
@@ -41,8 +45,8 @@ import fr.husi.di.initHusiKoin
 import fr.husi.ktx.Logs
 import fr.husi.ktx.exitApplication
 import fr.husi.ktx.invariantDirectoryPathString
+import fr.husi.ktx.sha256Hex
 import fr.husi.ktx.toList
-import fr.husi.ktx.toStringIterator
 import fr.husi.libcore.Client
 import fr.husi.libcore.Libcore
 import fr.husi.libcore.loadCA
@@ -54,15 +58,13 @@ import fr.husi.resources.app_name
 import fr.husi.resources.close
 import fr.husi.resources.exit
 import fr.husi.resources.ic_service_active
-import fr.husi.resources.instance_already_running
-import fr.husi.resources.instance_already_running_title
 import fr.husi.resources.service_mode
 import fr.husi.resources.service_mode_proxy
 import fr.husi.resources.service_mode_vpn
 import fr.husi.resources.start
 import fr.husi.resources.stop
-import fr.husi.ui.MainScreen
 import fr.husi.ui.LogLevel
+import fr.husi.ui.MainScreen
 import fr.husi.utils.CrashHandler
 import fr.husi.utils.closeQuietly
 import fr.husi.utils.copyBundledRuleSetAssetsIfNeeded
@@ -83,18 +85,37 @@ import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 import java.awt.Desktop
 import java.io.File
-import java.util.concurrent.TimeUnit
+import java.nio.file.Files
+import java.nio.file.Path
 import javax.swing.JOptionPane
 import javax.swing.JTextArea
 import javax.swing.UIManager
 import kotlin.system.exitProcess
-import com.kdroid.composetray.menu.api.Key as TrayKey
+import kotlin.time.Duration.Companion.milliseconds
+import dev.nucleusframework.composenativetray.menu.api.Key as TrayKey
 
 private const val APP_NAME = "fr.husi"
 
-fun main(args: Array<String>) = DesktopMain().main(args)
+fun main(args: Array<String>) {
+    configureNucleusAppIdentity()
+    DesktopMain(args).main(args)
+}
 
-private class DesktopMain : CliktCommand(APP_NAME) {
+/**
+ * Nucleus runtime modules resolve the app identity from these properties (normally injected by
+ * the Nucleus Gradle plugin, which we do not use). NucleusApp caches them on first access, so
+ * they must be set before any Nucleus API is touched: the Windows toast backend derives its
+ * AUMID and Start Menu shortcut name from them, and AutoLaunch login-launch detection — which
+ * runs ahead of the runtime bootstrap — keys its systemd unit name on the app id.
+ */
+private fun configureNucleusAppIdentity() {
+    System.setProperty("nucleus.app.id", APP_NAME)
+    System.setProperty("nucleus.app.name", "Husi")
+}
+
+private class DesktopMain(
+    private val rawArgs: Array<String>,
+) : CliktCommand(APP_NAME) {
 
     companion object {
         private const val MIN_LOG_LEVEL = 0
@@ -102,6 +123,8 @@ private class DesktopMain : CliktCommand(APP_NAME) {
 
         private const val PREFERENCE_NODE_PROPERTY_NAME = "me.zhanghai.compose.preference.node"
         private const val PREFERENCE_NODE_NAME = "/fr/husi/preference"
+
+        private const val LOCK_ID_HASH_LENGTH = 16
     }
 
     val baseDir: File? by option(
@@ -144,6 +167,15 @@ private class DesktopMain : CliktCommand(APP_NAME) {
         hidden = true,
         help = "[Internal] Run a hidden desktop task and exit.",
     )
+
+    /**
+     * True when this process was launched by the login auto-start mechanism: via the explicit
+     * flags (Windows Run entry, legacy entries) or via platform detection for the argument-less
+     * Linux systemd unit / macOS SMAppService registrations.
+     */
+    private val launchedAtLogin: Boolean by lazy {
+        autoStart || DesktopAutoStart.wasStartedAtLogin(rawArgs)
+    }
 
     override val invokeWithoutSubcommand = true
 
@@ -191,11 +223,21 @@ private class DesktopMain : CliktCommand(APP_NAME) {
             DeepLinkDispatcher.emit(link)
         }
 
-        application {
+        // AWT backend explicitly: the tray library links against the Tao backend, and Auto
+        // resolution would pick Tao if it ever lands on the classpath — husi's windows are
+        // plain Compose/AWT. Nucleus's built-in single instance stays off: husi drives
+        // SingleInstanceManager itself in initDesktopRuntime, before libcore bootstrap and
+        // with a payload carrying multiple deep links (the built-in path handles one URI
+        // and unconditionally restores the window).
+        nucleusApplication(
+            args = rawArgs,
+            backend = NucleusBackend.Awt,
+            enableSingleInstance = false,
+        ) {
             val repository = resolveDesktopRepository()
-            val supportTray = remember { isNativeTrayLikelySupported() }
+            val startInBackground = background || launchedAtLogin
             var windowVisible by remember {
-                mutableStateOf(!background || !supportTray)
+                mutableStateOf(!startInBackground)
             }
 
             val windowState = rememberWindowState(size = DpSize(1200.dp, 800.dp))
@@ -203,6 +245,18 @@ private class DesktopMain : CliktCommand(APP_NAME) {
             fun openWindow() {
                 windowVisible = true
                 windowState.isMinimized = false
+            }
+
+            LaunchedEffect(Unit) {
+                DesktopNotificationCenter.activations.collect {
+                    openWindow()
+                }
+            }
+
+            LaunchedEffect(Unit) {
+                InstanceRestoreBus.restores.collect {
+                    openWindow()
+                }
             }
 
             fun exitGracefully() {
@@ -215,7 +269,7 @@ private class DesktopMain : CliktCommand(APP_NAME) {
             }
 
             DesktopResourceEnvironmentFix {
-                LaunchedEffect(autoStart) {
+                LaunchedEffect(Unit) {
                     if (shouldAutoConnectOnLaunch()) {
                         repository.startService()
                     }
@@ -224,92 +278,84 @@ private class DesktopMain : CliktCommand(APP_NAME) {
                 val appName = stringResource(Res.string.app_name)
                 val iconServiceActive = painterResource(Res.drawable.ic_service_active)
 
-                if (supportTray) {
-                    val serviceStatus by BackendState.status.collectAsState()
-                    val switchText = stringResource(
-                        if (serviceStatus.state == ServiceState.Connected) {
-                            Res.string.stop
-                        } else {
-                            Res.string.start
-                        },
-                    )
+                val serviceStatus by BackendState.status.collectAsState()
+                val switchText = stringResource(
+                    if (serviceStatus.state == ServiceState.Connected) {
+                        Res.string.stop
+                    } else {
+                        Res.string.start
+                    },
+                )
 
-                    val textServiceMode = stringResource(Res.string.service_mode)
-                    val textServiceModeProxy = stringResource(Res.string.service_mode_proxy)
-                    val textServiceModeVpn = stringResource(Res.string.service_mode_vpn)
-                    val serviceMode by DataStore.configurationStore
-                        .stringFlow(Key.SERVICE_MODE, Key.MODE_VPN)
-                        .collectAsState(Key.MODE_VPN)
+                val textServiceMode = stringResource(Res.string.service_mode)
+                val textServiceModeProxy = stringResource(Res.string.service_mode_proxy)
+                val textServiceModeVpn = stringResource(Res.string.service_mode_vpn)
+                val serviceMode by DataStore.configurationStore
+                    .stringFlow(Key.SERVICE_MODE, Key.MODE_VPN)
+                    .collectAsState(Key.MODE_VPN)
 
-                    val textExit = stringResource(Res.string.exit)
-                    val iconClose = painterResource(Res.drawable.close)
-                    Tray(
-                        icon = iconServiceActive,
-                        tooltip = appName,
-                        primaryAction = ::openWindow,
-                        menuContent = {
-                            Item(
-                                label = serviceStatus.profileName ?: appName,
-                                shortcut = KeyShortcut(TrayKey.O),
-                            ) {
-                                openWindow()
-                            }
+                val textExit = stringResource(Res.string.exit)
+                val iconClose = painterResource(Res.drawable.close)
+                Tray(
+                    icon = iconServiceActive,
+                    tooltip = appName,
+                    primaryAction = ::openWindow,
+                    menuContent = {
+                        Item(
+                            label = serviceStatus.profileName ?: appName,
+                            shortcut = KeyShortcut(TrayKey.O),
+                        ) {
+                            openWindow()
+                        }
+                        CheckableItem(
+                            label = switchText,
+                            checked = serviceStatus.state == ServiceState.Connected
+                                    || serviceStatus.state == ServiceState.Stopped
+                                    || serviceStatus.state == ServiceState.Idle,
+                            onCheckedChange = {
+                                when (serviceStatus.state) {
+                                    ServiceState.Stopped -> repository.startService()
+                                    ServiceState.Idle, ServiceState.Connected -> repository.stopService()
+                                    else -> {}
+                                }
+                            },
+                            shortcut = KeyShortcut(TrayKey.Return, ctrl = true),
+                        )
+                        SubMenu(
+                            label = textServiceMode,
+                        ) {
                             CheckableItem(
-                                label = switchText,
-                                checked = serviceStatus.state == ServiceState.Connected
-                                        || serviceStatus.state == ServiceState.Stopped
-                                        || serviceStatus.state == ServiceState.Idle,
+                                label = textServiceModeProxy,
+                                checked = serviceMode == Key.MODE_PROXY,
                                 onCheckedChange = {
-                                    when (serviceStatus.state) {
-                                        ServiceState.Stopped -> repository.startService()
-                                        ServiceState.Idle, ServiceState.Connected -> repository.stopService()
-                                        else -> {}
+                                    if (serviceMode != Key.MODE_PROXY) {
+                                        DataStore.serviceMode = Key.MODE_PROXY
+                                        repository.reloadService()
                                     }
                                 },
-                                shortcut = KeyShortcut(TrayKey.Return, ctrl = true),
                             )
-                            SubMenu(
-                                label = textServiceMode,
-                            ) {
-                                CheckableItem(
-                                    label = textServiceModeProxy,
-                                    checked = serviceMode == Key.MODE_PROXY,
-                                    onCheckedChange = {
-                                        if (serviceMode != Key.MODE_PROXY) {
-                                            DataStore.serviceMode = Key.MODE_PROXY
-                                            repository.reloadService()
-                                        }
-                                    },
-                                )
-                                CheckableItem(
-                                    label = textServiceModeVpn,
-                                    checked = serviceMode == Key.MODE_VPN,
-                                    onCheckedChange = {
-                                        if (serviceMode != Key.MODE_VPN) {
-                                            DataStore.serviceMode = Key.MODE_VPN
-                                            repository.reloadService()
-                                        }
-                                    },
-                                )
-                            }
-                            Item(
-                                label = textExit,
-                                icon = iconClose,
-                                shortcut = KeyShortcut(TrayKey.Q),
-                                onClick = ::exitGracefully,
+                            CheckableItem(
+                                label = textServiceModeVpn,
+                                checked = serviceMode == Key.MODE_VPN,
+                                onCheckedChange = {
+                                    if (serviceMode != Key.MODE_VPN) {
+                                        DataStore.serviceMode = Key.MODE_VPN
+                                        repository.reloadService()
+                                    }
+                                },
                             )
-                        },
-                    )
-                }
+                        }
+                        Item(
+                            label = textExit,
+                            icon = iconClose,
+                            shortcut = KeyShortcut(TrayKey.Q),
+                            onClick = ::exitGracefully,
+                        )
+                    },
+                )
 
                 Window(
-                    onCloseRequest = {
-                        if (supportTray) {
-                            windowVisible = false
-                        } else {
-                            exitGracefully()
-                        }
-                    },
+                    onCloseRequest = ::exitGracefully,
                     state = windowState,
                     visible = windowVisible,
                     title = appName,
@@ -318,9 +364,7 @@ private class DesktopMain : CliktCommand(APP_NAME) {
                     AppTheme {
                         MainScreen(
                             moveToBackground = {
-                                if (supportTray) {
-                                    windowVisible = false
-                                }
+                                windowVisible = false
                             },
                         )
                     }
@@ -329,29 +373,8 @@ private class DesktopMain : CliktCommand(APP_NAME) {
         }
     }
 
-    private fun isNativeTrayLikelySupported(): Boolean {
-        if (!PlatformInfo.isLinux) {
-            return true
-        }
-        return isStatusNotifierWatcherAvailable()
-    }
-
-    private fun isStatusNotifierWatcherAvailable(): Boolean {
-        return runCatching {
-            val process = ProcessBuilder("busctl", "--user", "--no-pager", "--no-legend", "list")
-                .redirectError(ProcessBuilder.Redirect.DISCARD)
-                .start()
-            val output = process.inputStream.bufferedReader().use { it.readText() }
-            val exited = process.waitFor(500, TimeUnit.MILLISECONDS)
-            if (!exited) {
-                process.destroyForcibly()
-            }
-            exited && process.exitValue() == 0 && output.contains("org.kde.StatusNotifierWatcher")
-        }.getOrDefault(false)
-    }
-
     private fun shouldAutoConnectOnLaunch(): Boolean {
-        return autoStart
+        return launchedAtLogin
                 && DataStore.persistAcrossReboot
                 && DataStore.selectedProxy > 0L
                 && !DataStore.serviceState.started
@@ -360,28 +383,46 @@ private class DesktopMain : CliktCommand(APP_NAME) {
     private fun initDesktopRuntime(deepLinks: List<String>) {
         fixComposePreferenceNode()
         val repository = createDesktopRepository()
-        val filesDir = repository.filesDir.invariantDirectoryPathString()
 
-        if (!many) {
-            when (val result = checkExistingInstance(filesDir, deepLinks)) {
-                ExistingInstanceCheckResult.NotFound -> Unit
-
-                is ExistingInstanceCheckResult.LibcoreJNIBroken -> {
-                    warnLibcoreLoadFailureAndExit(result.e)
-                }
-
-                ExistingInstanceCheckResult.ExistsNoDeepLink
-                    if (autoStart) -> exitApplication()
-
-                ExistingInstanceCheckResult.ExistsNoDeepLink,
-                ExistingInstanceCheckResult.ExistsForwardFailed,
-                    -> warnForExistInstanceAndExit(repository, filesDir)
-
-                ExistingInstanceCheckResult.ExistsForwarded -> exitApplication()
-            }
+        if (!many && !acquireSingleInstanceLock(repository, deepLinks)) {
+            // A running instance holds the lock and has been handed this launch's payload.
+            exitApplication()
         }
 
         bootstrapDesktopRuntime(repository, startCommandServer = true)
+    }
+
+    /**
+     * Acquires the single-instance file lock via Nucleus.
+     *
+     * The lock identifier hashes the files directory so instances started with different
+     * `-d` data directories coexist, matching the per-directory scoping of the command
+     * socket. Lock files stay in the default temp directory: Nucleus writes the
+     * restore-request payload to a temp file and moves it into place, and keeping both on
+     * the same filesystem makes that move an atomic rename.
+     *
+     * On the primary instance this registers a watcher handling later launches' payloads;
+     * on a secondary launch it writes the payload for the primary and returns false.
+     */
+    private fun acquireSingleInstanceLock(
+        repository: DesktopRepository,
+        deepLinks: List<String>,
+    ): Boolean {
+        val filesDir = repository.filesDir.invariantDirectoryPathString()
+        SingleInstanceManager.configuration = SingleInstanceManager.Configuration(
+            lockIdentifier = "$APP_NAME-${filesDir.sha256Hex().take(LOCK_ID_HASH_LENGTH)}",
+        )
+        // A login auto-start finding an instance already running should stay unnoticed;
+        // any other secondary launch pops the primary's window up.
+        val restoreWindow = deepLinks.isNotEmpty() || !launchedAtLogin
+        return SingleInstanceManager.isSingleInstance(
+            onRestoreFileCreated = {
+                writeRestorePayload(this, restoreWindow, deepLinks)
+            },
+            onRestoreRequest = {
+                handleRestoreRequest(this)
+            },
+        )
     }
 
     /**
@@ -424,7 +465,7 @@ private class DesktopMain : CliktCommand(APP_NAME) {
         repository: DesktopRepository,
         startCommandServer: Boolean,
     ) {
-        DesktopAutoStart.initialize()
+        DesktopNotificationCenter.initialize()
         DesktopTaskScheduler.initialize()
         initHusiKoin(repository)
         Thread.setDefaultUncaughtExceptionHandler(CrashHandler)
@@ -440,21 +481,58 @@ private class DesktopMain : CliktCommand(APP_NAME) {
                 copyBundledRuleSetAssetsIfNeeded()
             }
         }
-        Libcore.initCore(
-            true,
-            true,
-            cacheDir,
-            filesDir,
-            externalAssetsDir,
-            DataStore.logMaxLine,
-            logLevel ?: DataStore.logLevel,
-            isOfficialProvider,
-            DataStore.isExpert,
-        )
-        loadCA(DataStore.certProvider)
+        try {
+            // First touch of the Libcore class in this process: loads the JNI library.
+            Libcore.initCore(
+                true,
+                true,
+                cacheDir,
+                filesDir,
+                externalAssetsDir,
+                DataStore.logMaxLine,
+                logLevel ?: DataStore.logLevel,
+                isOfficialProvider,
+                DataStore.isExpert,
+            )
+            loadCA(DataStore.certProvider)
+        } catch (e: LinkageError) {
+            warnLibcoreLoadFailureAndExit(e)
+        }
         if (startCommandServer) {
             repository.boxService?.start()
         }
+    }
+}
+
+/**
+ * First line of a single-instance restore-request payload; the remaining lines are deep
+ * links to import. [RESTORE_PAYLOAD_SILENT] keeps the primary's window untouched (login
+ * auto-start racing an already running instance), anything else brings it to the front.
+ */
+private const val RESTORE_PAYLOAD_RESTORE = "restore"
+private const val RESTORE_PAYLOAD_SILENT = "silent"
+
+private fun writeRestorePayload(path: Path, restoreWindow: Boolean, deepLinks: List<String>) {
+    val lines = buildList {
+        add(if (restoreWindow) RESTORE_PAYLOAD_RESTORE else RESTORE_PAYLOAD_SILENT)
+        addAll(deepLinks)
+    }
+    Files.write(path, lines)
+}
+
+/** Runs on the Nucleus watcher thread of the primary instance. */
+private fun handleRestoreRequest(path: Path) {
+    val lines = try {
+        Files.readAllLines(path)
+    } catch (e: Exception) {
+        Logs.w("read single-instance restore request", e)
+        return
+    }
+    for (link in lines.drop(1)) {
+        DeepLinkDispatcher.emit(link)
+    }
+    if (lines.firstOrNull() != RESTORE_PAYLOAD_SILENT) {
+        InstanceRestoreBus.fire()
     }
 }
 
@@ -497,42 +575,10 @@ private fun registerMacOSOpenUriHandler() {
     }
 }
 
-private sealed interface ExistingInstanceCheckResult {
-    object NotFound : ExistingInstanceCheckResult
-    class LibcoreJNIBroken(val e: LinkageError) : ExistingInstanceCheckResult
-    object ExistsNoDeepLink : ExistingInstanceCheckResult
-    object ExistsForwarded : ExistingInstanceCheckResult
-    object ExistsForwardFailed : ExistingInstanceCheckResult
-}
-
 private enum class ExistingTaskDispatchResult {
     NotFound,
     Forwarded,
     ForwardFailed,
-}
-
-private fun checkExistingInstance(
-    socketBasePath: String,
-    deepLinks: List<String>,
-): ExistingInstanceCheckResult {
-    val client = try {
-        connectExistingClient(socketBasePath)
-    } catch (e: LinkageError) {
-        return ExistingInstanceCheckResult.LibcoreJNIBroken(e)
-    } catch (_: Exception) {
-        null
-    } ?: return ExistingInstanceCheckResult.NotFound
-    return try {
-        if (deepLinks.isEmpty()) {
-            ExistingInstanceCheckResult.ExistsNoDeepLink
-        } else if (forwardDeepLinks(client, deepLinks)) {
-            ExistingInstanceCheckResult.ExistsForwarded
-        } else {
-            ExistingInstanceCheckResult.ExistsForwardFailed
-        }
-    } finally {
-        client.close()
-    }
 }
 
 private fun connectExistingClient(socketBasePath: String): Client? {
@@ -547,14 +593,6 @@ private fun connectExistingClient(socketBasePath: String): Client? {
         return null
     }
     return client
-}
-
-private fun forwardDeepLinks(client: Client, deepLinks: List<String>): Boolean {
-    return runCatching {
-        client.importDeepLinks(deepLinks.toStringIterator(deepLinks.size))
-    }.onFailure {
-        Logs.e(it)
-    }.isSuccess
 }
 
 private fun checkExistingTaskInstance(
@@ -579,21 +617,6 @@ private fun forwardTask(client: Client, taskId: String): Boolean {
     }.onFailure {
         Logs.e(it)
     }.isSuccess
-}
-
-private fun warnForExistInstanceAndExit(repository: DesktopRepository, socketBasePath: String) {
-    val socketPath = socketBasePath + Libcore.Socket
-    val title = runBlocking { repository.getString(Res.string.instance_already_running_title) }
-    val message = runBlocking {
-        repository.getString(Res.string.instance_already_running, socketPath)
-    }
-    try {
-        showSelectableMessageDialog(message, title, JOptionPane.WARNING_MESSAGE)
-    } catch (e: Exception) {
-        System.err.println("$title: $message")
-        System.err.println(e.message)
-    }
-    exitProcess(1)
 }
 
 private fun showSelectableMessageDialog(
@@ -648,7 +671,7 @@ private fun currentClashMode(socketBasePath: String): String? {
             }
         }
         try {
-            withTimeoutOrNull(2_000) { firstMode.await() }
+            withTimeoutOrNull(2_000.milliseconds) { firstMode.await() }
         } finally {
             client.closeQuietly() // unblock the native read so `reader` can finish
             reader.cancel()
@@ -818,7 +841,10 @@ private class ConnCommand : ClientCommand("conn") {
                             for (info in filtered) {
                                 addJsonObject {
                                     put("uuid", info.uuid)
-                                    put("state", if (info.closedAt.isNotEmpty()) "closed" else "active")
+                                    put(
+                                        "state",
+                                        if (info.closedAt.isNotEmpty()) "closed" else "active",
+                                    )
                                     put("network", info.network)
                                     put("src", info.src)
                                     put("dst", info.dst)

@@ -359,14 +359,22 @@ kotlin {
                 }
                 implementation(libs.clikt)
                 implementation(libs.kotlinx.coroutines.swing)
-                implementation(libs.com.kdroid.composetray)
-                implementation(libs.dbus.java.core)
-                implementation(libs.dbus.java.transport.native.unixsocket)
-                implementation(libs.jna.platform)
+                implementation(libs.nucleus.composetray)
+                implementation(libs.nucleus.application)
+                implementation(libs.nucleus.notification)
+                implementation(libs.nucleus.darkmode.detector)
+                implementation(libs.nucleus.autolaunch)
                 implementation(libcoreDesktopJarRequired)
             }
         }
     }
+}
+
+// The tray links the Tao window backend transitively; husi stays on the AWT backend
+// (see DesktopMain), so keep Tao off the classpath entirely — with it present,
+// nucleusApplication's Auto backend resolution would prefer Tao.
+configurations.named("desktopMainImplementation") {
+    exclude(group = "dev.nucleusframework", module = "nucleus.decorated-window-tao")
 }
 
 compose.desktop {
