@@ -658,6 +658,8 @@
     <string name="status_goroutines" translatable="false">Goroutines</string>
     <string name="status_memory">Memory</string>
     <string name="status_status">Status</string>
+    <string name="status_proxy">Proxy</string>
+    <string name="status_direct">Direct</string>
     <string name="disable_post_quantum">Disable post-quantum key agreement</string>
     <string name="mux_strategy">Mux Strategy</string>
     <string name="mux_number">Mux Number</string>
@@ -689,6 +691,7 @@
     <string name="certificate_authority">Certificate Authority</string>
     <string name="mozilla" translatable="false">Mozilla</string>
     <string name="system_and_user">System and User</string>
+    <string name="system_daemon">System Daemon</string>
     <string name="http_proxy_bypass">HTTP proxy bypass list</string>
     <string name="udp_over_tcp" translatable="false">UDP over TCP</string>
     <string name="reality_public_key">REALITY Public Key</string>
@@ -731,6 +734,8 @@
     <string name="idle_timeout">IDLE Timeout</string>
     <string name="urltest_tolerance">Tolerance</string>
     <string name="expand">Expand</string>
+    <string name="hide">Hide</string>
+    <string name="show">Show</string>
     <string name="selected">Selected</string>
     <string name="update_proxy_apps_when_install">Update Proxy Apps when Install</string>
     <string name="filter_regex">Filter (Regex)</string>
@@ -811,6 +816,22 @@
     <string name="cancel">Cancel</string>
     <string name="search_go">Search</string>
 
+    <string name="remote_control">Remote control</string>
+    <string name="remote_server_add">Add server</string>
+    <string name="remote_server_edit">Edit server</string>
+    <string name="remote_server_url_hint">host:port or http(s)://host:port</string>
+    <string name="remote_server_url_invalid">Enter host:port or http(s)://host:port</string>
+    <string name="remote_server_secret">Secret</string>
+    <string name="remote_target">Target</string>
+    <string name="remote_target_local">Local device</string>
+    <string name="remote_target_manage">Manage servers…</string>
+    <string name="remote_empty">No remote servers yet</string>
+    <string name="remote_reconnecting">Reconnecting…</string>
+    <string name="remote_disconnect">Disconnect</string>
+    <string name="remote_test_success">Connected to %1$s</string>
+    <string name="remote_uptime">Uptime %1$s</string>
+    <string name="remote_delete_confirm">Remove this remote server?</string>
+
     <!-- security warnings -->
     <string name="warn_hysteria_legacy">The configuration (Hysteria1) is deprecated.\n\nLearn more: https://v2.hysteria.network/docs/misc/2-vs-1/</string>
     <string name="warn_insecure">The configuration (insecure) can be detected and identified, the transmission is fully visible to the censor and is not resistant to man-in-the-middle tampering with the content of the communication.</string>
@@ -829,11 +850,13 @@
     <string name="latency">Latency</string>
     <string name="select_file">Select File</string>
     <string name="openconnect_authentication">OpenConnect Authentication</string>
+    <string name="openvpn_authentication">OpenVPN Authentication</string>
     <string name="clear_remembered_authentication_answers">Clear remembered authentication answers</string>
     <string name="auth_later">Later</string>
     <string name="auth_submit">Submit</string>
     <string name="auth_continue">Continue</string>
     <string name="auth_open_url">Open authentication page</string>
+    <string name="auth_response">Response</string>
     <string name="auth_browser_callback_hint">After completing sign-in in the browser, provide the requested callback data.</string>
     <string name="auth_final_url">Final URL</string>
     <string name="auth_cookie">Cookie</string>
@@ -851,5 +874,4 @@
     <string name="ipv4" translatable="false">IPv4</string>
     <string name="ipv6" translatable="false">IPv6</string>
     <string name="connected_since">Connected since</string>
-    <string name="openconnect_auth_channel">OpenConnect Authentication</string>
 </resources>

@@ -1,12 +1,8 @@
-@file:OptIn(ExperimentalAtomicApi::class)
-
 package fr.husi.ui
 
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import fr.husi.GroupType
 import fr.husi.Key
 import fr.husi.bg.DeepLinkDispatcher
@@ -22,23 +18,21 @@ import fr.husi.ktx.Logs
 import fr.husi.ktx.SubscriptionFoundException
 import fr.husi.ktx.onIoDispatcher
 import fr.husi.ktx.readableMessage
-import fr.husi.ktx.urlTestOptions
 import fr.husi.repository.Repository
 import fr.husi.repository.resolveRepository
 import fr.husi.resources.*
-import fr.husi.utils.LibcoreClientManager
-import kotlin.concurrent.atomics.ExperimentalAtomicApi
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 
 @Immutable
 sealed interface URLTestStatus {
@@ -55,123 +49,74 @@ data class AlertButton(
 )
 
 @Immutable
-sealed interface MainViewModelUiEvent {
-    class Snackbar(val message: StringOrRes) : MainViewModelUiEvent
-    class SnackbarWithAction(
-        val message: StringOrRes,
-        val actionLabel: StringOrRes,
-        val callback: (SnackbarResult) -> Unit,
-    ) : MainViewModelUiEvent
-
-    class AlertDialog(
-        val title: StringOrRes,
-        val message: StringOrRes,
-        val confirmButton: AlertButton,
-        val dismissButton: AlertButton? = null,
-        val onDismiss: (() -> Unit)? = null,
-    ) : MainViewModelUiEvent
-}
+class MainAlertDialogEvent(
+    val title: StringOrRes,
+    val message: StringOrRes,
+    val confirmButton: AlertButton,
+    val dismissButton: AlertButton? = null,
+    val onDismiss: (() -> Unit)? = null,
+)
 
 @Stable
 class MainViewModel(
     private val repository: Repository = resolveRepository(),
     private val importLinkInteractor: ImportLinkInteractor = ImportLinkInteractor(),
-) : ViewModel() {
+    private val snackbar: SnackbarEmitter = SnackbarEmitter(),
+) : AutoCloseable {
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     val urlTestStatus: StateFlow<URLTestStatus>
         field = MutableStateFlow<URLTestStatus>(URLTestStatus.Initial)
 
-    val uiEvent: SharedFlow<MainViewModelUiEvent>
-        field = MutableSharedFlow<MainViewModelUiEvent>()
+    val dialogEvent: SharedFlow<MainAlertDialogEvent>
+        field = MutableSharedFlow<MainAlertDialogEvent>()
 
     private fun alertDialog(
         message: StringOrRes,
         title: StringOrRes = StringOrRes.Res(Res.string.error_title),
-    ) = MainViewModelUiEvent.AlertDialog(
+    ) = MainAlertDialogEvent(
         title = title,
         message = message,
         confirmButton = AlertButton(StringOrRes.Res(Res.string.ok)) {},
     )
 
     init {
-        viewModelScope.launch {
+        scope.launch {
             DeepLinkDispatcher.flow.collect { link ->
                 importFromUri(link)
             }
         }
 
-        viewModelScope.launch {
+        scope.launch {
             DataStore.configurationStore.keysFlow(
                 Key.PROXY_APPS,
                 Key.BYPASS_MODE,
                 Key.PACKAGES,
             ).collectLatest {
                 if (DataStore.serviceState.canStop) {
-                    uiEvent.emit(
-                        MainViewModelUiEvent.SnackbarWithAction(
-                            message = StringOrRes.Res(Res.string.need_reload),
-                            actionLabel = StringOrRes.Res(Res.string.apply),
-                            callback = { result ->
-                                if (result == SnackbarResult.ActionPerformed) {
-                                    repository.reloadService()
-                                }
-                            },
-                        ),
-                    )
+                    snackbar.show(
+                        StringOrRes.Res(Res.string.need_reload),
+                        StringOrRes.Res(Res.string.apply),
+                    ) { result ->
+                        if (result == SnackbarResult.ActionPerformed) {
+                            repository.reloadService()
+                        }
+                    }
                 }
             }
         }
-    }
-
-    override fun onCleared() {
-        runBlocking {
-            urlTestClient.close()
-        }
-        super.onCleared()
-    }
-
-    fun showSnackbar(message: StringOrRes) = viewModelScope.launch {
-        uiEvent.emit(MainViewModelUiEvent.Snackbar(message))
     }
 
     fun resetUrlTestStatus() {
         urlTestStatus.value = URLTestStatus.Initial
     }
 
-    private val urlTestClient = LibcoreClientManager()
-
-    fun urlTest() = viewModelScope.launch(Dispatchers.IO) {
-        urlTestStatus.update { status ->
-            if (status == URLTestStatus.Testing) {
-                return@launch
-            }
-            URLTestStatus.Testing
-        }
-        if (!DataStore.serviceState.connected) {
-            urlTestStatus.update { URLTestStatus.Exception("not started") }
-            return@launch
-        }
-        try {
-            var result = -1
-            urlTestClient.withClient { client ->
-                result = client.urlTest(
-                    "",
-                    DataStore.connectionTestURL,
-                    DataStore.connectionTestTimeout,
-                    urlTestOptions,
-                )
-            }
-            urlTestStatus.update { URLTestStatus.Success(result) }
-        } catch (e: Exception) {
-            urlTestStatus.update { URLTestStatus.Exception(e.readableMessage) }
-        }
-    }
-
-    fun importFromUri(uri: String) = viewModelScope.launch {
+    fun importFromUri(uri: String) = scope.launch {
         val preview = try {
             importLinkInteractor.parseUri(uri)
         } catch (e: Exception) {
-            uiEvent.emit(alertDialog(StringOrRes.Direct(e.readableMessage)))
+            dialogEvent.emit(alertDialog(StringOrRes.Direct(e.readableMessage)))
             return@launch
         }
         when (preview) {
@@ -181,11 +126,11 @@ class MainViewModel(
         }
     }
 
-    fun importSubscription(uri: String) = viewModelScope.launch {
+    fun importSubscription(uri: String) = scope.launch {
         val group = try {
             importLinkInteractor.parseSubscription(uri)
         } catch (e: Exception) {
-            uiEvent.emit(alertDialog(StringOrRes.Direct(e.readableMessage)))
+            dialogEvent.emit(alertDialog(StringOrRes.Direct(e.readableMessage)))
             return@launch
         } ?: return@launch
         showImportSubscriptionDialog(group)
@@ -193,12 +138,12 @@ class MainViewModel(
 
     private suspend fun showImportSubscriptionDialog(group: ProxyGroup) {
         val detail = group.name + "\n" + group.subscription?.link + "\n" + group.subscription?.token
-        uiEvent.emit(
-            MainViewModelUiEvent.AlertDialog(
+        dialogEvent.emit(
+            MainAlertDialogEvent(
                 title = StringOrRes.Res(Res.string.subscription_import),
                 message = StringOrRes.ResWithParams(Res.string.subscription_import_message, detail),
                 confirmButton = AlertButton(StringOrRes.Res(Res.string.ok)) {
-                    viewModelScope.launch(Dispatchers.Default) {
+                    scope.launch(Dispatchers.Default) {
                         val createdGroup = onIoDispatcher {
                             importLinkInteractor.createSubscriptionGroup(group)
                         }
@@ -212,18 +157,18 @@ class MainViewModel(
 
     private suspend fun showImportProfileDialog(profiles: List<AbstractBean>) {
         if (profiles.isEmpty()) {
-            uiEvent.emit(alertDialog(StringOrRes.Res(Res.string.no_proxies_found)))
+            dialogEvent.emit(alertDialog(StringOrRes.Res(Res.string.no_proxies_found)))
             return
         }
-        uiEvent.emit(
-            MainViewModelUiEvent.AlertDialog(
+        dialogEvent.emit(
+            MainAlertDialogEvent(
                 title = StringOrRes.Res(Res.string.profile_import),
                 message = StringOrRes.ResWithParams(
                     Res.string.profile_import_message,
                     profiles.joinToString("\n") { it.displayName() },
                 ),
                 confirmButton = AlertButton(StringOrRes.Res(Res.string.ok)) {
-                    viewModelScope.launch(Dispatchers.IO) {
+                    scope.launch(Dispatchers.IO) {
                         importProfile(profiles)
                     }
                 },
@@ -232,21 +177,21 @@ class MainViewModel(
         )
     }
 
-    fun parseProxy(text: String?) = viewModelScope.launch {
+    fun parseProxy(text: String?) = scope.launch {
         if (text.isNullOrBlank()) {
-            uiEvent.emit(MainViewModelUiEvent.Snackbar(StringOrRes.Res(Res.string.clipboard_empty)))
+            snackbar.show(StringOrRes.Res(Res.string.clipboard_empty))
             return@launch
         }
         when (text.substringBefore("://", "").lowercase()) {
-            "http", "https" -> uiEvent.emit(
-                MainViewModelUiEvent.AlertDialog(
+            "http", "https" -> dialogEvent.emit(
+                MainAlertDialogEvent(
                     title = StringOrRes.Res(Res.string.import_url),
                     message = StringOrRes.Res(Res.string.import_http_url),
                     confirmButton = AlertButton(StringOrRes.Res(Res.string.subscription_import)) {
                         importSubscription(text)
                     },
                     dismissButton = AlertButton(StringOrRes.Res(Res.string.profile_import)) {
-                        viewModelScope.launch {
+                        scope.launch {
                             parseSubscription(text)
                         }
                     },
@@ -261,7 +206,7 @@ class MainViewModel(
         try {
             val proxies = RawUpdater.parseRaw(text)
             if (proxies.isNullOrEmpty()) {
-                uiEvent.emit(MainViewModelUiEvent.Snackbar(StringOrRes.Res(Res.string.no_proxies_found_in_clipboard)))
+                snackbar.show(StringOrRes.Res(Res.string.no_proxies_found_in_clipboard))
             } else {
                 importProfile(proxies)
             }
@@ -269,28 +214,26 @@ class MainViewModel(
             importSubscription(e.link)
         } catch (e: Exception) {
             Logs.w(e)
-            uiEvent.emit(MainViewModelUiEvent.Snackbar(StringOrRes.Direct(e.readableMessage)))
+            snackbar.show(StringOrRes.Direct(e.readableMessage))
         }
     }
 
     suspend fun importProfile(proxies: List<AbstractBean>) {
         val importedCount = importLinkInteractor.importProfiles(proxies)
-        uiEvent.emit(
-            MainViewModelUiEvent.Snackbar(
-                StringOrRes.PluralsRes(
-                    Res.plurals.added,
-                    importedCount,
-                    importedCount,
-                ),
+        snackbar.show(
+            StringOrRes.PluralsRes(
+                Res.plurals.added,
+                importedCount,
+                importedCount,
             ),
         )
     }
 
-    fun updateSubscriptionGroup(group: ProxyGroup) = viewModelScope.launch(Dispatchers.Default) {
+    fun updateSubscriptionGroup(group: ProxyGroup) = scope.launch(Dispatchers.Default) {
         performGroupUpdate(group, true)
     }
 
-    fun updateAllSubscriptionGroups() = viewModelScope.launch(Dispatchers.Default) {
+    fun updateAllSubscriptionGroups() = scope.launch(Dispatchers.Default) {
         val groups = onIoDispatcher {
             SagerDatabase.groupDao.allGroups().first()
                 .filter { it.type == GroupType.SUBSCRIPTION }
@@ -302,8 +245,8 @@ class MainViewModel(
 
     suspend fun confirm(message: String): Boolean {
         val deferred = CompletableDeferred<Boolean>()
-        uiEvent.emit(
-            MainViewModelUiEvent.AlertDialog(
+        dialogEvent.emit(
+            MainAlertDialogEvent(
                 title = StringOrRes.Res(Res.string.confirm),
                 message = StringOrRes.Direct(message),
                 confirmButton = AlertButton(StringOrRes.Res(Res.string.ok)) {
@@ -344,7 +287,7 @@ class MainViewModel(
         when (result) {
             is GroupUpdateResult.Success -> presentGroupUpdateSuccess(result)
             is GroupUpdateResult.Failure -> {
-                uiEvent.emit(alertDialog(StringOrRes.Direct("${result.group.name}: ${result.message}")))
+                dialogEvent.emit(alertDialog(StringOrRes.Direct("${result.group.name}: ${result.message}")))
             }
 
             else -> Unit
@@ -354,22 +297,18 @@ class MainViewModel(
     private suspend fun presentGroupUpdateSuccess(result: GroupUpdateResult.Success) {
         val changed = result.diff.changed
         if (changed == 0) {
-            uiEvent.emit(
-                MainViewModelUiEvent.Snackbar(
-                    StringOrRes.ResWithParams(Res.string.group_no_difference, result.group.displayName()),
-                ),
+            snackbar.show(
+                StringOrRes.ResWithParams(Res.string.group_no_difference, result.group.displayName()),
             )
             return
         }
         if (!result.byUser) {
-            uiEvent.emit(
-                MainViewModelUiEvent.Snackbar(
-                    StringOrRes.PluralsRes(
-                        Res.plurals.group_updated,
-                        changed,
-                        result.group.displayName(),
-                        changed,
-                    ),
+            snackbar.show(
+                StringOrRes.PluralsRes(
+                    Res.plurals.group_updated,
+                    changed,
+                    result.group.displayName(),
+                    changed,
                 ),
             )
             return
@@ -412,7 +351,7 @@ class MainViewModel(
                 )
             }
         }
-        uiEvent.emit(
+        dialogEvent.emit(
             alertDialog(
                 message = StringOrRes.Compound(parts),
                 title = StringOrRes.ResWithParams(Res.string.group_diff, result.group.displayName()),
@@ -420,20 +359,22 @@ class MainViewModel(
         )
     }
 
-    private suspend fun presentGroupUpdateWarnings(warnings: List<GroupUpdateWarning>) {
-        for (warning in warnings) {
-            uiEvent.emit(
-                MainViewModelUiEvent.Snackbar(
-                    StringOrRes.Compound(
-                        parts = listOf(
-                            StringOrRes.Direct(warning.group),
-                            StringOrRes.Direct(warning.message),
-                        ),
-                        separator = ": ",
+    private fun presentGroupUpdateWarnings(warnings: List<GroupUpdateWarning>) {
+        for ((group, message) in warnings) {
+            snackbar.show(
+                StringOrRes.Compound(
+                    parts = listOf(
+                        StringOrRes.Direct(group),
+                        StringOrRes.Direct(message),
                     ),
+                    separator = ": ",
                 ),
             )
         }
+    }
+
+    override fun close() {
+        scope.cancel()
     }
 }
 

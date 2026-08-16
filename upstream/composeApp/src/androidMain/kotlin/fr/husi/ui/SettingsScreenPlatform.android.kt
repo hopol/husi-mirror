@@ -91,6 +91,10 @@ internal actual fun AutoConnectPreference() {
 }
 
 @Composable
+internal actual fun PlatformDaemonSettingsGroup(showMessage: (String) -> Unit) {
+}
+
+@Composable
 internal actual fun rememberApplyNightMode(): (Int) -> Unit {
     val context = LocalContext.current
     return remember(context) {

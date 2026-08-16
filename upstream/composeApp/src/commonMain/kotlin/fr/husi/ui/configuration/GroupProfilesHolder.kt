@@ -1,5 +1,3 @@
-@file:OptIn(ExperimentalLayoutApi::class)
-
 package fr.husi.ui.configuration
 
 import androidx.compose.foundation.BorderStroke
@@ -8,7 +6,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -25,10 +22,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.PlainTooltip
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.TooltipAnchorPosition
 import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipDefaults
-import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -66,7 +64,6 @@ import fr.husi.compose.fadingEdge
 import fr.husi.compose.material3.Icon
 import fr.husi.compose.material3.IconButton
 import fr.husi.compose.material3.Text
-import fr.husi.compose.rememberScrollHideState
 import fr.husi.compose.setPlainText
 import fr.husi.database.DataStore
 import fr.husi.database.ProxyEntity
@@ -145,7 +142,6 @@ internal fun GroupHolderScreen(
     onCopySuccess: () -> Unit,
     showSnackbar: (message: StringOrRes) -> Unit,
     showUndoSnackbar: (count: Int, onUndo: () -> Unit) -> Unit,
-    onScrollHideChange: (Boolean) -> Unit = {},
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
     val resultBus = onOpenProfileEditor?.let { LocalResultEventBus.current }
@@ -173,11 +169,6 @@ internal fun GroupHolderScreen(
 
     val dragDropListState = rememberDragDropSwipeLazyColumnState()
     val focusRequester = remember { FocusRequester() }
-
-    val scrollHideVisible by rememberScrollHideState(dragDropListState.lazyListState)
-    LaunchedEffect(scrollHideVisible) {
-        onScrollHideChange(scrollHideVisible)
-    }
 
     LaunchedEffect(uiState.scrollIndex) {
         uiState.scrollIndex?.let { index ->
@@ -402,7 +393,10 @@ private fun DraggableSwipeableItemScope<ProfileItem>.ProxyCard(
 
     var showShareSheet by remember { mutableStateOf(false) }
     var showSecurityAlert by remember { mutableStateOf(false) }
-    val shareSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val shareSheetState = rememberBottomSheetState(
+        initialValue = SheetValue.Hidden,
+        enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
+    )
     val validateResult = if (showActions && securityAdvice) {
         bean.isInsecure()
     } else {

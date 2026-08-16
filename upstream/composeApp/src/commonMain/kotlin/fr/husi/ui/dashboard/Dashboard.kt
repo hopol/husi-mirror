@@ -1,5 +1,4 @@
 @file:OptIn(
-    ExperimentalLayoutApi::class,
     ExperimentalMaterial3ExpressiveApi::class,
     ExperimentalMaterial3Api::class,
 )
@@ -11,7 +10,6 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -19,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.AlertDialog
@@ -29,20 +28,17 @@ import androidx.compose.material3.ExpandedFullScreenSearchBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MenuDefaults
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SearchBarValue
-import androidx.compose.material3.SnackbarDuration
-import fr.husi.compose.SwipeableSnackbarHost
-import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Surface
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.material3.rememberSearchBarState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -50,28 +46,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.layout.positionInRoot
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.util.fastCoerceAtLeast
+import androidx.compose.ui.unit.max
 import androidx.compose.ui.util.fastCoerceIn
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.husi.TrafficSortMode
-import fr.husi.bg.BackendState
-import fr.husi.bg.ServiceState
 import fr.husi.compose.CapsuleActionButton
 import fr.husi.compose.CapsuleSearchInputField
 import fr.husi.compose.CapsuleSearchTopBar
 import fr.husi.compose.CapsuleTopBar
 import fr.husi.compose.DropdownMenuSectionHeader
-import fr.husi.compose.PlatformMenuIcon
-import fr.husi.compose.SagerFab
+import fr.husi.compose.SagerFabClearance
 import fr.husi.compose.SimpleIconButton
-import fr.husi.compose.StatsBar
 import fr.husi.compose.TextButton
 import fr.husi.compose.material3.Checkbox
 import fr.husi.compose.material3.Icon
@@ -79,7 +67,7 @@ import fr.husi.compose.material3.PrimaryTabRow
 import fr.husi.compose.material3.Tab
 import fr.husi.compose.material3.Text
 import fr.husi.compose.paddingExceptBottom
-import fr.husi.repository.resolveRepository
+import fr.husi.core.remote.RemoteControlManager
 import fr.husi.resources.Res
 import fr.husi.resources.ascending
 import fr.husi.resources.by_destination
@@ -99,7 +87,6 @@ import fr.husi.resources.copy_success
 import fr.husi.resources.descending
 import fr.husi.resources.ensure_close_all
 import fr.husi.resources.have_reset_network
-import fr.husi.resources.menu
 import fr.husi.resources.menu_dashboard
 import fr.husi.resources.more
 import fr.husi.resources.more_vert
@@ -116,16 +103,17 @@ import fr.husi.resources.sort_mode
 import fr.husi.resources.traffic_connections
 import fr.husi.resources.traffic_status
 import fr.husi.resources.warning_amber
-import fr.husi.ui.MainViewModel
-import fr.husi.ui.MainViewModelAlertDialog
-import fr.husi.ui.MainViewModelUiEvent
+import fr.husi.ui.LocalSnackbarEmitter
+import fr.husi.ui.RouteSettingsUiState
 import fr.husi.ui.StringOrRes
-import fr.husi.ui.getStringOrRes
 import fr.husi.ui.openconnect.OpenConnectAuthController
+import fr.husi.ui.openvpn.OpenVPNAuthController
+import fr.husi.ui.remote.RemoteSessionBanner
+import fr.husi.ui.remote.RemoteTargetMenuSection
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import org.jetbrains.compose.resources.vectorResource
-import kotlin.math.max
+import org.koin.compose.koinInject
 
 private const val PAGE_STATUS = 0
 private const val PAGE_CONNECTIONS = 1
@@ -134,14 +122,13 @@ private const val PAGE_PROXY_SET = 2
 @Composable
 fun DashboardScreen(
     modifier: Modifier = Modifier,
-    mainViewModel: MainViewModel,
     openConnectController: OpenConnectAuthController,
-    onDrawerClick: () -> Unit,
-    openConnectionDetail: (uuid: String) -> Unit,
+    openVPNController: OpenVPNAuthController,
+    openRouteSettings: (RouteSettingsUiState) -> Unit,
+    onOpenRemoteControl: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    val snackbarState = remember { SnackbarHostState() }
-    var showAlertDialog by remember { mutableStateOf<MainViewModelUiEvent.AlertDialog?>(null) }
+    val snackbar = LocalSnackbarEmitter.current
     val loadPlatformNetworkInfo = rememberLoadPlatformNetworkInfo()
 
     val pagerState = rememberPagerState(
@@ -149,15 +136,19 @@ fun DashboardScreen(
         pageCount = { 3 },
     )
 
+    val remoteControl = koinInject<RemoteControlManager>()
     val dashboardViewModel: DashboardViewModel =
-        viewModel { DashboardViewModel(loadPlatformNetworkInfo) }
+        viewModel {
+            DashboardViewModel(
+                loadPlatformNetworkInfo = loadPlatformNetworkInfo,
+                remoteControl = remoteControl,
+            )
+        }
     val uiState by dashboardViewModel.uiState.collectAsStateWithLifecycle()
+    val remoteSession by remoteControl.session.collectAsStateWithLifecycle()
+    val targetConnected by remoteControl.targetConnected.collectAsStateWithLifecycle()
     var isOverflowMenuExpanded by remember { mutableStateOf(false) }
     var showResetAlert by remember { mutableStateOf(false) }
-    var bottomVisible by remember { mutableStateOf(true) }
-    var scaffoldHeightPx by remember { mutableIntStateOf(0) }
-    var fabTopPx by remember { mutableFloatStateOf(Float.NaN) }
-    var fabHeightPx by remember { mutableIntStateOf(0) }
     val focusManager = LocalFocusManager.current
     val isConnectionsPage = pagerState.currentPage == PAGE_CONNECTIONS
 
@@ -190,9 +181,8 @@ fun DashboardScreen(
     }
     val windowInsets = WindowInsets.safeDrawing
 
-    val serviceStatus by BackendState.status.collectAsStateWithLifecycle()
-    LaunchedEffect(serviceStatus.state.connected) {
-        dashboardViewModel.initialize(serviceStatus.state.connected)
+    LaunchedEffect(remoteSession?.server?.id, targetConnected) {
+        dashboardViewModel.initialize(targetConnected)
     }
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     val topAppBarColors = TopAppBarDefaults.topAppBarColors()
@@ -212,15 +202,15 @@ fun DashboardScreen(
             .nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
             Surface(color = appBarContainerColor) {
-                Column {
+                Column(
+                    modifier = Modifier.windowInsetsPadding(
+                        windowInsets.only(WindowInsetsSides.Top),
+                    ),
+                ) {
                     if (isConnectionsPage) {
                         CapsuleSearchTopBar(
                             inputField = searchInputField,
-                            navigationIcon = PlatformMenuIcon(
-                                imageVector = vectorResource(Res.drawable.menu),
-                                contentDescription = stringResource(Res.string.menu),
-                                onClick = onDrawerClick,
-                            ),
+                            navigationIcon = null,
                             actions = {
                                 CapsuleActionButton {
                                     SimpleIconButton(
@@ -233,12 +223,14 @@ fun DashboardScreen(
                                         onClick = { dashboardViewModel.togglePause() },
                                     )
                                 }
-                                CapsuleActionButton {
-                                    SimpleIconButton(
-                                        imageVector = vectorResource(Res.drawable.cleaning_services),
-                                        contentDescription = stringResource(Res.string.reset_connections),
-                                        onClick = { showResetAlert = true },
-                                    )
+                                if (!uiState.isRemote) {
+                                    CapsuleActionButton {
+                                        SimpleIconButton(
+                                            imageVector = vectorResource(Res.drawable.cleaning_services),
+                                            contentDescription = stringResource(Res.string.reset_connections),
+                                            onClick = { showResetAlert = true },
+                                        )
+                                    }
                                 }
                                 CapsuleActionButton {
                                     Box {
@@ -252,8 +244,14 @@ fun DashboardScreen(
                                             expanded = isOverflowMenuExpanded,
                                             onDismissRequest = { isOverflowMenuExpanded = false },
                                         ) {
+                                            RemoteTargetMenuSection(
+                                                groupIndex = 0,
+                                                groupCount = 4,
+                                                onManage = onOpenRemoteControl,
+                                                onDismiss = { isOverflowMenuExpanded = false },
+                                            )
                                             DropdownMenuGroup(
-                                                shapes = MenuDefaults.groupShape(0, 3),
+                                                shapes = MenuDefaults.groupShape(1, 4),
                                             ) {
                                                 DropdownMenuSectionHeader(stringResource(Res.string.sort))
                                                 DropdownMenuItem(
@@ -279,7 +277,7 @@ fun DashboardScreen(
                                             Spacer(modifier = Modifier.height(MenuDefaults.GroupSpacing))
 
                                             DropdownMenuGroup(
-                                                shapes = MenuDefaults.groupShape(1, 3),
+                                                shapes = MenuDefaults.groupShape(2, 4),
                                             ) {
                                                 DropdownMenuSectionHeader(stringResource(Res.string.sort_mode))
                                                 val sortModes = TrafficSortMode.values
@@ -313,7 +311,7 @@ fun DashboardScreen(
                                             Spacer(modifier = Modifier.height(MenuDefaults.GroupSpacing))
 
                                             DropdownMenuGroup(
-                                                shapes = MenuDefaults.groupShape(2, 3),
+                                                shapes = MenuDefaults.groupShape(3, 4),
                                             ) {
                                                 DropdownMenuSectionHeader(stringResource(Res.string.connection_status))
                                                 DropdownMenuItem(
@@ -347,21 +345,40 @@ fun DashboardScreen(
                                     }
                                 }
                             },
-                            windowInsets = windowInsets.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
+                            windowInsets = windowInsets.only(WindowInsetsSides.Horizontal),
                             scrollBehavior = scrollBehavior,
                         )
                     } else {
                         CapsuleTopBar(
-                            navigationIcon = PlatformMenuIcon(
-                                imageVector = vectorResource(Res.drawable.menu),
-                                contentDescription = stringResource(Res.string.menu),
-                                onClick = onDrawerClick,
-                            ),
+                            navigationIcon = null,
                             title = { Text(stringResource(Res.string.menu_dashboard)) },
-                            windowInsets = windowInsets.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
+                            actions = {
+                                CapsuleActionButton {
+                                    Box {
+                                        SimpleIconButton(
+                                            imageVector = vectorResource(Res.drawable.more_vert),
+                                            contentDescription = stringResource(Res.string.more),
+                                            onClick = { isOverflowMenuExpanded = true },
+                                        )
+                                        DropdownMenuPopup(
+                                            expanded = isOverflowMenuExpanded,
+                                            onDismissRequest = { isOverflowMenuExpanded = false },
+                                        ) {
+                                            RemoteTargetMenuSection(
+                                                groupIndex = 0,
+                                                groupCount = 1,
+                                                onManage = onOpenRemoteControl,
+                                                onDismiss = { isOverflowMenuExpanded = false },
+                                            )
+                                        }
+                                    }
+                                }
+                            },
+                            windowInsets = windowInsets.only(WindowInsetsSides.Horizontal),
                             scrollBehavior = scrollBehavior,
                         )
                     }
+                    RemoteSessionBanner()
 
                     PrimaryTabRow(
                         selectedTabIndex = pagerState.currentPage,
@@ -398,66 +415,11 @@ fun DashboardScreen(
                 }
             }
         },
-        snackbarHost = { SwipeableSnackbarHost(snackbarState) },
-        floatingActionButton = {
-            Box(
-                modifier = Modifier
-                    .onGloballyPositioned { coordinates ->
-                        fabTopPx = coordinates.positionInRoot().y
-                    }
-                    .onSizeChanged { fabHeightPx = it.height },
-            ) {
-                SagerFab(
-                    visible = bottomVisible,
-                    state = serviceStatus.state,
-                    showSnackbar = { message ->
-                        scope.launch {
-                            snackbarState.showSnackbar(
-                                message = getStringOrRes(message),
-                                actionLabel = resolveRepository().getString(Res.string.ok),
-                                duration = SnackbarDuration.Short,
-                            )
-                        }
-                    },
-                )
-            }
-        },
-        bottomBar = {
-            if (serviceStatus.state == ServiceState.Connected) {
-                StatsBar(
-                    status = serviceStatus,
-                    visible = bottomVisible,
-                    mainViewModel = mainViewModel,
-                )
-            }
-        },
     ) { innerPadding ->
-        val density = LocalDensity.current
-        val innerBottomPx = with(density) { innerPadding.calculateBottomPadding().roundToPx() }
-        val fabReservedBottomPx by remember(scaffoldHeightPx, fabTopPx) {
-            derivedStateOf {
-                if (scaffoldHeightPx <= 0 || fabTopPx.isNaN()) {
-                    0
-                } else {
-                    (scaffoldHeightPx - fabTopPx.toInt()).fastCoerceAtLeast(0)
-                }
-            }
-        }
-        val effectiveFabReservedBottomPx by remember(
-            bottomVisible,
-            fabReservedBottomPx,
-            fabHeightPx,
-        ) {
-            derivedStateOf {
-                if (bottomVisible && fabHeightPx > 0) fabReservedBottomPx else 0
-            }
-        }
-        val bottomPaddingPx = max(innerBottomPx, effectiveFabReservedBottomPx)
-        val bottomPadding = with(density) { bottomPaddingPx.toDp() }
+        val bottomPadding = max(innerPadding.calculateBottomPadding(), SagerFabClearance)
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .onSizeChanged { scaffoldHeightPx = it.height }
                 .paddingExceptBottom(innerPadding),
         ) {
             HorizontalPager(
@@ -468,21 +430,15 @@ fun DashboardScreen(
                     PAGE_STATUS -> DashboardStatusScreen(
                         uiState = uiState,
                         openConnectController = openConnectController,
+                        openVPNController = openVPNController,
                         bottomPadding = bottomPadding,
                         selectClashMode = { dashboardViewModel.setClashMode(it) },
                         showError = { message ->
-                            mainViewModel.showSnackbar(StringOrRes.Direct(message))
+                            snackbar.show(StringOrRes.Direct(message))
                         },
                         onCopySuccess = {
-                            scope.launch {
-                                snackbarState.showSnackbar(
-                                    message = resolveRepository().getString(Res.string.copy_success),
-                                    actionLabel = resolveRepository().getString(Res.string.ok),
-                                    duration = SnackbarDuration.Short,
-                                )
-                            }
+                            snackbar.show(StringOrRes.Res(Res.string.copy_success))
                         },
-                        onVisibleChange = { bottomVisible = it },
                     )
 
                     PAGE_CONNECTIONS -> DashboardConnectionsScreen(
@@ -492,8 +448,7 @@ fun DashboardScreen(
                         closeConnection = { uuid ->
                             dashboardViewModel.closeConnection(uuid)
                         },
-                        openDetail = openConnectionDetail,
-                        onVisibleChange = { bottomVisible = it },
+                        onConnectionClick = dashboardViewModel::selectConnection,
                     )
 
                     PAGE_PROXY_SET -> DashboardProxySetScreen(
@@ -504,7 +459,6 @@ fun DashboardScreen(
                         },
                         urlTestForSingle = dashboardViewModel::urlTestForSingle,
                         urlTestForGroup = dashboardViewModel::urlTestForGroup,
-                        onVisibleChange = { bottomVisible = it },
                     )
 
                     else -> error("impossible")
@@ -524,9 +478,29 @@ fun DashboardScreen(
             closeConnection = { uuid ->
                 dashboardViewModel.closeConnection(uuid)
             },
-            openDetail = openConnectionDetail,
-            onVisibleChange = {},
+            onConnectionClick = dashboardViewModel::selectConnection,
         )
+    }
+
+    uiState.selectedConnection?.let { connection ->
+        ModalBottomSheet(
+            onDismissRequest = { dashboardViewModel.selectConnection(null) },
+            sheetState = rememberBottomSheetState(
+                initialValue = SheetValue.Hidden,
+                enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
+            ),
+        ) {
+            ConnectionDetailSheet(
+                connection = connection,
+                resolveProcessInfo = dashboardViewModel::resolveProcessInfo,
+                closeConnection = dashboardViewModel::closeConnection,
+                onDismiss = { dashboardViewModel.selectConnection(null) },
+                openRouteSettings = { draft ->
+                    dashboardViewModel.selectConnection(null)
+                    openRouteSettings(draft)
+                },
+            )
+        }
     }
 
     if (showResetAlert) AlertDialog(
@@ -534,13 +508,7 @@ fun DashboardScreen(
         confirmButton = {
             TextButton(stringResource(Res.string.ok)) {
                 dashboardViewModel.resetNetwork()
-                scope.launch {
-                    snackbarState.showSnackbar(
-                        message = resolveRepository().getString(Res.string.have_reset_network),
-                        actionLabel = resolveRepository().getString(Res.string.ok),
-                        duration = SnackbarDuration.Short,
-                    )
-                }
+                snackbar.show(StringOrRes.Res(Res.string.have_reset_network))
                 showResetAlert = false
             }
         },
@@ -556,35 +524,4 @@ fun DashboardScreen(
         text = { Text(stringResource(Res.string.ensure_close_all, uiState.connections.size)) },
     )
 
-    LaunchedEffect(Unit) {
-        mainViewModel.uiEvent.collect { event ->
-            when (event) {
-                is MainViewModelUiEvent.Snackbar -> scope.launch {
-                    snackbarState.showSnackbar(
-                        message = getStringOrRes(event.message),
-                        actionLabel = resolveRepository().getString(Res.string.ok),
-                        duration = SnackbarDuration.Short,
-                    )
-                }
-
-                is MainViewModelUiEvent.SnackbarWithAction -> scope.launch {
-                    val result = snackbarState.showSnackbar(
-                        message = getStringOrRes(event.message),
-                        actionLabel = getStringOrRes(event.actionLabel),
-                        duration = SnackbarDuration.Short,
-                    )
-                    event.callback(result)
-                }
-
-                is MainViewModelUiEvent.AlertDialog -> showAlertDialog = event
-
-            }
-        }
-    }
-
-    showAlertDialog?.let { dialog ->
-        MainViewModelAlertDialog(dialog) {
-            showAlertDialog = null
-        }
-    }
 }

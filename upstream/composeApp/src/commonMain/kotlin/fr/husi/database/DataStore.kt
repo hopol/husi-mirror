@@ -28,7 +28,9 @@ import kotlinx.coroutines.runBlocking
 
 object DataStore {
 
-    // share service state in main & bg process
+    // Per-process copy of the current service state. @Volatile does not cross
+    // processes: the UI process is fed by ServiceEventMirror, :bg by BaseService,
+    // and desktop by CoreHostController.
     @Volatile
     var serviceState = ServiceState.Idle
 
@@ -250,5 +252,9 @@ object DataStore {
     var customPluginPrefix by configurationStore.string(Key.CUSTOM_PLUGIN_PREFIX)
 
     var rulesFirstCreate by configurationStore.boolean(Key.RULES_FIRST_CREATE)
+
+    var desktopNavRailWidth by configurationStore.int(Key.DESKTOP_NAV_RAIL_WIDTH) { 220 }
+
+    var activeRemoteServerId by configurationStore.long(Key.ACTIVE_REMOTE_SERVER_ID)
 
 }

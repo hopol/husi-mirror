@@ -54,14 +54,10 @@ internal fun DashboardConnectionsScreen(
     bottomPadding: Dp,
     resolveProcessInfo: suspend (String?, Int) -> ProcessInfo?,
     closeConnection: (uuid: String) -> Unit,
-    openDetail: (uuid: String) -> Unit,
-    onVisibleChange: (Boolean) -> Unit,
+    onConnectionClick: (uuid: String) -> Unit,
 ) {
     val itemSpacing = 12.dp
     val listState = rememberLazyListState()
-    LaunchedEffect(Unit) {
-        onVisibleChange(true)
-    }
 
     Box(
         modifier = modifier.fillMaxSize(),
@@ -109,7 +105,7 @@ internal fun DashboardConnectionsScreen(
                         ConnectionCard(
                             connection = connection,
                             resolveProcessInfo = resolveProcessInfo,
-                            openDetail = openDetail,
+                            onConnectionClick = onConnectionClick,
                         )
                     }
                 }
@@ -131,7 +127,7 @@ private fun ConnectionCard(
     modifier: Modifier = Modifier,
     connection: ConnectionDetailState,
     resolveProcessInfo: suspend (String?, Int) -> ProcessInfo?,
-    openDetail: (id: String) -> Unit,
+    onConnectionClick: (uuid: String) -> Unit,
 ) {
     val process = connection.processes?.firstOrNull()
     val uid = connection.uid
@@ -142,7 +138,7 @@ private fun ConnectionCard(
     }
 
     ElevatedCard(
-        onClick = { openDetail(connection.uuid) },
+        onClick = { onConnectionClick(connection.uuid) },
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 4.dp),

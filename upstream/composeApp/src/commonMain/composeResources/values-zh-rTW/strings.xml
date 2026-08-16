@@ -543,6 +543,8 @@
     <string name="traffic_connections">連接</string>
     <string name="status_memory">執行記憶體</string>
     <string name="status_status">狀態</string>
+    <string name="status_proxy">代理</string>
+    <string name="status_direct">直連</string>
     <string name="done">完成</string>
     <string name="custom_plugin_prefix">自訂插件前綴</string>
     <string name="custom_plugin_prefix_summary">請確保您完全信任插件提供者。</string>
@@ -578,6 +580,7 @@
     <string name="listen_port">監聽埠</string>
     <string name="certificate_authority">數位憑證認證機構</string>
     <string name="system_and_user">系統和使用者</string>
+    <string name="system_daemon">系統守護行程</string>
     <string name="http_proxy_bypass">HTTP 代理繞過列表</string>
     <string name="v2ray_transport">V2Ray 傳輸</string>
     <string name="reality_public_key">REALITY 公鑰</string>
@@ -609,6 +612,8 @@
     <string name="idle_timeout">閒置逾時</string>
     <string name="urltest_tolerance">容差</string>
     <string name="expand">展開</string>
+    <string name="hide">隱藏</string>
+    <string name="show">顯示</string>
     <string name="selected">已選定</string>
     <string name="update_proxy_apps_when_install">安裝時自動更新代理程式</string>
     <string name="filter_regex">過濾（正規表達式）</string>
@@ -661,11 +666,13 @@
     <string name="back">返回</string>
     <string name="quic">QUIC</string>
     <string name="openconnect_authentication">OpenConnect 驗證</string>
+    <string name="openvpn_authentication">OpenVPN 驗證</string>
     <string name="clear_remembered_authentication_answers">清除已記住的驗證答案</string>
     <string name="auth_later">稍後</string>
     <string name="auth_submit">提交</string>
     <string name="auth_continue">繼續</string>
     <string name="auth_open_url">開啟驗證頁面</string>
+    <string name="auth_response">回應</string>
     <string name="auth_browser_callback_hint">請在瀏覽器中完成登入，然後填寫所需的回呼資料。</string>
     <string name="auth_final_url">最終 URL</string>
     <string name="auth_cookie">Cookie</string>
@@ -683,5 +690,5 @@
     <string name="ipv4" translatable="false">IPv4</string>
     <string name="ipv6" translatable="false">IPv6</string>
     <string name="connected_since">連線時間</string>
-    <string name="openconnect_auth_channel">OpenConnect 驗證</string>
+
 </resources>

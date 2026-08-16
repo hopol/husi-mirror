@@ -132,16 +132,10 @@ object Key {
 
     const val RULES_FIRST_CREATE = "rulesFirstCreate"
 
-}
+    const val DESKTOP_NAV_RAIL_WIDTH = "desktopNavRailWidth"
 
-object AlertType {
-    const val COMMON = 0
+    const val ACTIVE_REMOTE_SERVER_ID = "activeRemoteServerId"
 
-    // message: none
-    const val MISSING_PLUGIN = 1
-
-    // message: plugin name
-    const val NEED_WIFI_PERMISSION = 2
 }
 
 fun logLevelString(level: Int): String = when (level) {

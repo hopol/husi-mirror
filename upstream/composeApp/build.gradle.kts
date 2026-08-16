@@ -21,6 +21,8 @@ enum class DesktopPlatform(
     val composeDependencyId: String,
     val nativeNames: Set<String>,
     val jnaName: String,
+    /** File name anja gives the core library, see `libcore/build.sh` (`-libname=husicore`). */
+    val libcoreLibraryName: String,
 ) {
     Linux(
         id = "linux",
@@ -28,6 +30,7 @@ enum class DesktopPlatform(
         composeDependencyId = "linux",
         nativeNames = setOf("linux"),
         jnaName = "linux",
+        libcoreLibraryName = "libhusicore.so",
     ),
     Darwin(
         id = "darwin",
@@ -35,6 +38,7 @@ enum class DesktopPlatform(
         composeDependencyId = "macos",
         nativeNames = setOf("osx", "darwin"),
         jnaName = "darwin",
+        libcoreLibraryName = "libhusicore.dylib",
     ),
     Windows(
         id = "windows",
@@ -42,6 +46,7 @@ enum class DesktopPlatform(
         composeDependencyId = "windows",
         nativeNames = setOf("windows"),
         jnaName = "win32",
+        libcoreLibraryName = "husicore.dll",
     ),
     ;
 
@@ -117,6 +122,8 @@ data class DesktopTarget(
                     listOf("natives/${platformName}_${archName}/", "natives/${platformName}-${archName}/")
                 }
             }.toSet()
+    /** The single entry anja puts in the libcore jar, the one native shipped as a sidecar instead. */
+    val libcoreNativeEntry: String = "natives/${platform.id}-${arch.id}/${platform.libcoreLibraryName}"
     val jnaNativeKeepPrefixes: Set<String> =
         setOf(
             "com/sun/jna/${platform.jnaName}-${arch.jnaName}/",
@@ -143,10 +150,25 @@ data class DesktopTarget(
     override fun toString(): String = id
 
     companion object {
+        /**
+         * androidx sqlite-bundled ships no `libsqliteJni` for these, so Room cannot open the
+         * database and the app dies on startup. Each one carries its own upstream issue.
+         * `darwin/amd64` is gone for good; `windows/arm64` comes back if upstream ever builds it.
+         */
+        private val missingBundledSqlite: Map<DesktopTarget, String> =
+            mapOf(
+                DesktopTarget(platform = DesktopPlatform.Darwin, arch = DesktopArch.Amd64) to
+                    "https://issuetracker.google.com/issues/495864182",
+                DesktopTarget(platform = DesktopPlatform.Windows, arch = DesktopArch.Arm64) to
+                    "https://issuetracker.google.com/issues/426464784",
+            )
+
         val supported: Set<DesktopTarget> =
-            DesktopPlatform.entries.flatMap { platform ->
-                DesktopArch.entries.map { arch -> DesktopTarget(platform, arch) }
-            }.toSet()
+            DesktopPlatform.entries
+                .flatMap { platform ->
+                    DesktopArch.entries.map { arch -> DesktopTarget(platform, arch) }
+                }.minus(missingBundledSqlite.keys)
+                .toSet()
 
         fun parse(rawValue: String): DesktopTarget {
             val tokens = rawValue.trim().split("/", limit = 2)
@@ -154,6 +176,11 @@ data class DesktopTarget(
                 "Invalid desktopTarget '$rawValue'. Use <platform>/<arch>, e.g. linux/amd64."
             }
             val parsedTarget = DesktopTarget(platform = DesktopPlatform.parse(tokens[0]), arch = DesktopArch.parse(tokens[1]))
+            val missingSqliteIssue = missingBundledSqlite[parsedTarget]
+            require(missingSqliteIssue == null) {
+                "Desktop target '$rawValue' has no androidx sqlite-bundled binary, so the app " +
+                    "cannot open its database. See $missingSqliteIssue."
+            }
             require(parsedTarget in supported) {
                 "Unsupported desktop target '$rawValue'. Supported targets: ${supported.joinToString()}."
             }
@@ -292,6 +319,7 @@ kotlin {
                 implementation(libs.filekit.dialogs.compose)
                 implementation(libs.aboutlibraries.compose.m3)
                 implementation(libs.zxing.core)
+                implementation(project(":proto"))
                 implementation(project(":library:DragDropSwipeLazyColumn"))
 
                 implementation(project.dependencies.platform(libs.koin.bom))
@@ -398,9 +426,28 @@ compose.resources {
     packageOfResClass = "fr.husi.resources"
 }
 
+val commonAboutLibrariesDir = layout.projectDirectory.dir("src/commonMain/aboutlibraries")
+val desktopAboutLibrariesDir = layout.projectDirectory.dir("src/desktopMain/aboutlibraries")
+val desktopAboutLibrariesConfig = layout.buildDirectory.dir("aboutlibraries-desktop-config")
+val exportDesktopAboutLibraries = gradle.startParameter.taskNames.any { taskName ->
+    taskName.substringAfterLast(':').equals("exportLibraryDefinitionsDesktop", ignoreCase = true)
+}
+
+val mergeDesktopAboutLibraries = tasks.register<Sync>("mergeDesktopAboutLibraries") {
+    description = "Merges shared and desktop-only AboutLibraries presets."
+    from(commonAboutLibrariesDir)
+    from(desktopAboutLibrariesDir)
+    into(desktopAboutLibrariesConfig)
+}
+
 aboutLibraries {
     collect {
-        configPath = file("src/commonMain/aboutlibraries")
+        // Desktop-only presets are merged in only for exportLibraryDefinitionsDesktop.
+        configPath = if (exportDesktopAboutLibraries) {
+            desktopAboutLibrariesConfig.get().asFile
+        } else {
+            commonAboutLibrariesDir.asFile
+        }
     }
     export {
         variant = "android"
@@ -411,6 +458,10 @@ aboutLibraries {
             outputFile = file("src/desktopMain/composeResources/files/aboutlibraries.json")
         }
     }
+}
+
+tasks.named("exportLibraryDefinitionsDesktop") {
+    dependsOn(mergeDesktopAboutLibraries)
 }
 
 ksp {
@@ -426,8 +477,10 @@ dependencies {
 tasks.matching { it.name == "packageUberJarForCurrentOS" }.configureEach {
     if (this is Jar) {
         // Exclude non-target native binaries from dependency family buckets.
+        // libcore natives/** are always stripped (thin release jar); others keep only the target arch.
 
         val nativeKeepPrefixes = desktopTarget.nativeKeepPrefixes
+        val libcoreNativeEntry = desktopTarget.libcoreNativeEntry
         val jnaNativeKeepPrefixes = desktopTarget.jnaNativeKeepPrefixes
         val composeTrayNativeKeepPrefixes = desktopTarget.composeTrayNativeKeepPrefixes
         val nucleusNativeKeepPrefixes = desktopTarget.nucleusNativeKeepPrefixes
@@ -440,7 +493,14 @@ tasks.matching { it.name == "packageUberJarForCurrentOS" }.configureEach {
 
         eachFile {
             val entryPath = path
-            if (entryPath.startsWith("natives/") && nativeKeepPrefixes.none(entryPath::startsWith)) {
+            // Keep only the target bucket of the natives/ family, and on top of that drop
+            // libcore's own native: the release uberjar is born thin (N7) and ships it as a
+            // plain file next to husi-core. Everything else here — androidx sqlite's
+            // libsqliteJni — has no sidecar. Dev classpath jars stay fat (untouched here).
+            if (
+                entryPath.startsWith("natives/") &&
+                (entryPath == libcoreNativeEntry || nativeKeepPrefixes.none(entryPath::startsWith))
+            ) {
                 exclude()
                 return@eachFile
             }

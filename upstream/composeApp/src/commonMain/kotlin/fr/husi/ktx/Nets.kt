@@ -4,6 +4,7 @@ import fr.husi.BuildConfig
 import fr.husi.database.DataStore
 import fr.husi.fmt.AbstractBean
 import fr.husi.fmt.LOCALHOST4
+import fr.husi.fmt.LOCALHOST_NAME
 import fr.husi.fmt.SingBoxOptions
 import fr.husi.libcore.Libcore
 import fr.husi.libcore.URL
@@ -13,7 +14,6 @@ import java.net.Inet6Address
 import java.net.InetSocketAddress
 import java.net.InterfaceAddress
 import java.net.Socket
-import kotlin.experimental.or
 
 var URL.pathSegments: List<String>
     get() = path.split("/").filter { it.isNotBlank() }
@@ -121,6 +121,13 @@ fun String.wrapIPV6Host(): String {
     }
 }
 
+fun String.isLoopbackHost(): Boolean {
+    if (equals(LOCALHOST_NAME, ignoreCase = true)) return true
+    val literal = unwrapIPV6Host()
+    if (!literal.isIpAddress()) return false
+    return runCatching { InetAddress.getByName(literal).isLoopbackAddress }.getOrDefault(false)
+}
+
 fun AbstractBean.wrapUri(): String {
     return "${finalAddress.wrapIPV6Host()}:$finalPort"
 }
@@ -152,15 +159,4 @@ fun InterfaceAddress.toPrefix(): String {
     } else {
         "${address.hostAddress}/${networkPrefixLength}"
     }
-}
-
-val urlTestOptions: Byte get() {
-    var options: Byte = 0
-    if (DataStore.connectionTestUnifiedDelay) {
-        options = options or Libcore.URLTestUnifiedDelay
-    }
-    if (DataStore.connectionTestIgnoreHandshakeTime) {
-        options = options or Libcore.URLTestIgnoreHandshakeTime
-    }
-    return options
 }
