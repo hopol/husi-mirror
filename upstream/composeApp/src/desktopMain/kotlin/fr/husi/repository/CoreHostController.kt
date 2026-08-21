@@ -16,6 +16,7 @@ import fr.husi.database.ProfileManager
 import fr.husi.fmt.buildConfig
 import fr.husi.ktx.Logs
 import fr.husi.ktx.readableMessage
+import fr.husi.libcore.Libcore
 import fr.husi.platform.Platform
 import fr.husi.platform.PlatformInfo
 import fr.husi.plugin.PluginNotFoundException
@@ -49,28 +50,17 @@ import java.util.concurrent.TimeUnit
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
-/**
- * Reactive snapshot of whether the UI is attached to the privileged system
- * daemon, whether that daemon's API revision matches this app, and whether
- * another local user currently owns it.
- */
 data class CoreHostState(
     val isDaemon: Boolean = false,
     val apiVersionMismatch: Boolean = false,
     val foreignOwner: DaemonOwner? = null,
 )
 
-/** Human-readable owner of a daemon this UI is attached to but does not own. */
 data class DaemonOwner(
     val name: String,
     val id: String,
 )
 
-/**
- * Desktop service orchestrator that prefers a privileged system daemon when
- * available, otherwise runs the proxy core out-of-process via
- * `husi-core session` and drives it over gRPC ([CoreClient] DaemonService).
- */
 internal class CoreHostController(
     private val repository: DesktopRepository,
     private val resolveCoreClient: () -> CoreClient = { GlobalContext.get().get() },
@@ -94,9 +84,8 @@ internal class CoreHostController(
     private var triedDaemon = false
 
     /**
-     * Set when [GetDaemonInfoResponse.apiVersion] does not match the API
-     * version this UI expects. Blocks start while connected to a mismatched
-     * daemon.
+     * Set when the attached daemon's API version differs from this app.
+     * The daemon remains usable; Settings exposes an update action.
      */
     private var apiVersionMismatch = false
 
@@ -331,14 +320,12 @@ internal class CoreHostController(
 
     private fun checkApiVersion(info: GetDaemonInfoResponse) {
         val daemonVersion = info.apiVersion
-        if (daemonVersion != EXPECTED_API_VERSION) {
-            apiVersionMismatch = true
+        apiVersionMismatch = daemonVersion != Libcore.APIVersion
+        if (apiVersionMismatch) {
             val message =
-                "Daemon version mismatch (daemon: $daemonVersion, app: $EXPECTED_API_VERSION). Update required."
+                "Daemon API version differs (daemon: $daemonVersion, app: ${Libcore.APIVersion}). Update available."
             Logs.w(message)
             BackendState.emitAlert(ServiceAlert.Common(message))
-        } else {
-            apiVersionMismatch = false
         }
         publishHostState()
     }
@@ -378,13 +365,6 @@ internal class CoreHostController(
 
         try {
             ensureHostLocked()
-
-            if (apiVersionMismatch && connectedToDaemon) {
-                stopLocked(
-                    "Daemon version mismatch (daemon api != app $EXPECTED_API_VERSION). Update required.",
-                )
-                return
-            }
 
             val owner = foreignOwner
             if (connectedToDaemon && owner != null) {
@@ -644,12 +624,6 @@ internal class CoreHostController(
     companion object {
         private val HOST_READY_TIMEOUT = 15.seconds
 
-        /**
-         * Must match `github.com/sagernet/sing-box/daemon.APIVersion` for the
-         * sing-box revision pinned in `libcore/go.mod`. Bump with the pin (or
-         * expose via the bridge later).
-         */
-        private const val EXPECTED_API_VERSION = 3
 
         /**
          * Parent directory of the Unix daemon UDS

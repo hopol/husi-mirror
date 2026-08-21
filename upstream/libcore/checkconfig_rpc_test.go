@@ -7,27 +7,30 @@ import (
 	"testing"
 	"time"
 
-	"libcore/coresvc"
-	"libcore/distro"
-	"libcore/pb/husi/v1"
-
 	"github.com/sagernet/sing-box"
-	"github.com/sagernet/sing-box/option"
-	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/service"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/xchacha20-poly1305/husi/libcore/v2/coresvc"
+	"github.com/xchacha20-poly1305/husi/libcore/v2/distro"
+	"github.com/xchacha20-poly1305/husi/libcore/v2/pb/husi/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 )
 
+type testHostBackend struct {
+	HostBackend
+}
+
+func (testHostBackend) BuildEnvironment() string { return "test" }
+
 func startLibcoreHost(t *testing.T) (*coresvc.Host, string) {
 	t.Helper()
 	ctx := box.Context(
-		context.Background(),
+		t.Context(),
 		distro.InboundRegistry(),
 		distro.OutboundRegistry(),
 		distro.EndpointRegistry(),
@@ -40,20 +43,7 @@ func startLibcoreHost(t *testing.T) (*coresvc.Host, string) {
 		Context:     ctx,
 		Version:     "check-test",
 		LogMaxLines: 50,
-		CheckConfig: CheckConfig,
-		GenerateSchema: func(kind husiv1.SchemaKind) (string, error) {
-			switch kind {
-			case husiv1.SchemaKind_SCHEMA_KIND_CONFIG:
-				return generateSchema[option.Options]()
-			case husiv1.SchemaKind_SCHEMA_KIND_OUTBOUND:
-				return generateSchema[option.Outbound]()
-			case husiv1.SchemaKind_SCHEMA_KIND_DNS_RULE:
-				return generateSchema[option.DNSRule]()
-			default:
-				return "", E.New("unknown schema kind")
-			}
-		},
-		BuildEnvironment: func() string { return "test" },
+		Backend:     testHostBackend{},
 	})
 	require.NoError(t, err)
 	socketPath := filepath.Join(t.TempDir(), coresvc.Socket)
@@ -85,7 +75,7 @@ func TestRealCheckConfigInvalidViaRPC(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	client := husiv1.NewApplicationServiceClient(conn)
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
 
 	_, err = client.CheckConfig(ctx, &husiv1.CheckConfigRequest{Config: "not-json"})
@@ -110,7 +100,7 @@ func TestRealGenerateSchemaViaRPC(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	client := husiv1.NewApplicationServiceClient(conn)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 
 	for _, kind := range []husiv1.SchemaKind{

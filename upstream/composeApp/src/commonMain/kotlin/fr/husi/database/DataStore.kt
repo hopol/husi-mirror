@@ -112,7 +112,7 @@ object DataStore {
         NetworkInterfaceStrategy.DEFAULT
     }
     var networkPreferredInterfaces by configurationStore.stringSet(Key.NETWORK_PREFERRED_INTERFACES)
-    // var forcedSearchProcess by configurationStore.boolean(Key.FORCED_SEARCH_PROCESS) { false }
+    var forcedSearchProcess by configurationStore.boolean(Key.FORCED_SEARCH_PROCESS) { false }
 
     var disableTcpKeepAlive by configurationStore.boolean(Key.DISABLE_TCP_KEEP_ALIVE) { PlatformInfo.isAndroid }
     var tcpKeepAliveIdle by configurationStore.string(Key.TCP_KEEP_ALIVE_IDLE) { "5m" }
@@ -233,6 +233,7 @@ object DataStore {
     var trafficDescending by configurationStore.boolean(Key.TRAFFIC_DESCENDING) { false }
     var trafficSortMode by configurationStore.int(Key.TRAFFIC_SORT_MODE) { TrafficSortMode.START }
     var trafficConnectionQuery by configurationStore.int(Key.TRAFFIC_CONNECTION_QUERY) { 1 shl 0 }
+    var proxySetOrder by configurationStore.int(Key.PROXY_SET_ORDER)
 
     var speedTestUrl by configurationStore.string(Key.SPEED_TEST_URL) { SPEED_TEST_URL }
     var speedTestUploadURL by configurationStore.string(Key.SPEED_TEST_UPLOAD_URL) { SPEED_TEST_UPLOAD_URL }

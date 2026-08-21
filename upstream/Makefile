@@ -18,7 +18,6 @@ DESKTOP_TARGET_GRADLE_ARG = $(if $(DESKTOP_TARGET),-PdesktopTarget=$(DESKTOP_TAR
 DESKTOP_TARGET_SCRIPT_ARG = $(if $(DESKTOP_TARGET),--target $(DESKTOP_TARGET),)
 JNI_INCLUDE_SCRIPT_ARG = $(if $(JNI_INCLUDE),--jniinclude "$(JNI_INCLUDE)",)
 DARWIN_SDK_SCRIPT_ARG = $(if $(DARWIN_SDK),--darwinsdk "$(DARWIN_SDK)",)
-NO_NAIVE_SCRIPT_ARG = $(if $(filter 1,$(NO_NAIVE)),--no-naive,)
 WINDOWS_NO_SIGN_SCRIPT_ARG = $(if $(filter 1,$(WINDOWS_NO_SIGN)),--no-sign,)
 LAUNCHER_ZIG_TARGET = $(subst linux/amd64,x86_64-linux-musl,$(subst linux/arm64,aarch64-linux-musl,$(subst darwin/arm64,aarch64-macos,$(subst windows/amd64,x86_64-windows,$(subst windows/arm64,aarch64-windows,$(DESKTOP_TARGET))))))
 LAUNCHER_ZIG_TARGET_ARG = $(if $(LAUNCHER_ZIG_TARGET),-Dtarget=$(LAUNCHER_ZIG_TARGET),)
@@ -34,12 +33,12 @@ COMMA = ,
 CORE_SHIM_GLIBC_VERSION = 2.17
 CORE_SHIM_MACOS_VERSION = 12.0
 
-.PHONY: libcore libcore_android libcore_desktop_common libcore_desktop core_desktop aboutlibraries aboutlibraries_go aboutlibraries_android aboutlibraries_desktop apk apk_debug assets desktop desktop_release desktop_package desktop_package_linux desktop_package_linux_all desktop_package_macos desktop_package_windows desktop_package_windows_all desktop_uberjar launcher lint_go proto proto_install test_go test_no_go_core_binary test_zig plugin generate_option lint_go_linux lint_go_android lint_go_windows
+.PHONY: libcore libcore_android libcore_desktop_common libcore_desktop core_desktop aboutlibraries aboutlibraries_go aboutlibraries_android aboutlibraries_desktop apk apk_debug assets desktop desktop_release desktop_package desktop_package_linux desktop_package_linux_all desktop_package_macos desktop_package_windows desktop_package_windows_jbr desktop_package_windows_all desktop_uberjar launcher lint_go proto proto_install test_go test_no_go_core_binary test_zig plugin generate_option lint_go_linux lint_go_android lint_go_windows
 
 build: libcore_android assets apk
 
 libcore:
-	./run lib core --desktop $(JNI_INCLUDE_SCRIPT_ARG) $(DARWIN_SDK_SCRIPT_ARG) $(NO_NAIVE_SCRIPT_ARG)
+	./run lib core --desktop $(JNI_INCLUDE_SCRIPT_ARG) $(DARWIN_SDK_SCRIPT_ARG)
 
 libcore_android:
 	./run lib core --android
@@ -52,7 +51,7 @@ libcore_desktop:
 		echo "DESKTOP_TARGETS is required, e.g. make libcore_desktop DESKTOP_TARGETS=linux/amd64,darwin/arm64"; \
 		exit 1; \
 	fi
-	./run lib core --desktop --desktoptargets $(DESKTOP_TARGETS) $(JNI_INCLUDE_SCRIPT_ARG) $(DARWIN_SDK_SCRIPT_ARG) $(NO_NAIVE_SCRIPT_ARG)
+	./run lib core --desktop --desktoptargets $(DESKTOP_TARGETS) $(JNI_INCLUDE_SCRIPT_ARG) $(DARWIN_SDK_SCRIPT_ARG)
 
 # Build the Zig husi-core shim and install it next to the anja sidecar in
 # libcore/build/<os>_<arch>/ (N2/N7). Sidecar comes from `make libcore`.
@@ -113,7 +112,7 @@ else
 endif
 
 desktop_package_linux:
-	BUILD_PLUGIN=none ./gradlew -p composeApp packageUberJarForCurrentOS $(DESKTOP_TARGET_GRADLE_ARG)
+	BUILD_PLUGIN=none ./gradlew -p composeApp packageReleaseUberJarForCurrentOS $(DESKTOP_TARGET_GRADLE_ARG)
 	$(MAKE) launcher
 	$(MAKE) core_desktop DESKTOP_TARGETS=$(if $(DESKTOP_TARGET),$(DESKTOP_TARGET),host)
 	./release/linux/package.sh --formats $(LINUX_PACKAGE_FORMATS) $(DESKTOP_TARGET_SCRIPT_ARG)
@@ -130,7 +129,7 @@ desktop_package_macos:
 		echo "desktop_package_macos on non-macOS hosts requires DESKTOP_TARGET, e.g. make desktop_package_macos DESKTOP_TARGET=darwin/arm64"; \
 		exit 1; \
 	fi
-	BUILD_PLUGIN=none ./gradlew -p composeApp packageUberJarForCurrentOS $(DESKTOP_TARGET_GRADLE_ARG)
+	BUILD_PLUGIN=none ./gradlew -p composeApp packageReleaseUberJarForCurrentOS $(DESKTOP_TARGET_GRADLE_ARG)
 	$(MAKE) launcher
 	$(MAKE) core_desktop DESKTOP_TARGETS=$(if $(DESKTOP_TARGET),$(DESKTOP_TARGET),host)
 	./release/macos/package.sh $(DESKTOP_TARGET_SCRIPT_ARG)
@@ -140,10 +139,30 @@ desktop_package_windows:
 		echo "desktop_package_windows requires DESKTOP_TARGET, e.g. make desktop_package_windows DESKTOP_TARGET=windows/amd64"; \
 		exit 1; \
 	fi
-	BUILD_PLUGIN=none ./gradlew -p composeApp packageUberJarForCurrentOS $(DESKTOP_TARGET_GRADLE_ARG)
+	BUILD_PLUGIN=none ./gradlew -p composeApp packageReleaseUberJarForCurrentOS $(DESKTOP_TARGET_GRADLE_ARG)
 	$(MAKE) launcher
 	$(MAKE) core_desktop DESKTOP_TARGETS=$(DESKTOP_TARGET)
 	./release/windows/package.sh $(DESKTOP_TARGET_SCRIPT_ARG) $(WINDOWS_NO_SIGN_SCRIPT_ARG)
+
+# Same inputs as desktop_package_windows. Also links a JetBrains Runtime into a
+# second pair of packages (names carry -jbr) so they need no system Java. Thin
+# zip/NSIS are still emitted from the same signed payloads. JBR_JMODS points at
+# the modules; without it they are fetched into build/jbr/ first. The fetch
+# script prints the resolved path last, after the banner ./run puts in front of
+# it.
+desktop_package_windows_jbr:
+	@if [ -z "$(DESKTOP_TARGET)" ]; then \
+		echo "desktop_package_windows_jbr requires DESKTOP_TARGET, e.g. make desktop_package_windows_jbr DESKTOP_TARGET=windows/amd64"; \
+		exit 1; \
+	fi
+	BUILD_PLUGIN=none ./gradlew -p composeApp packageReleaseUberJarForCurrentOS $(DESKTOP_TARGET_GRADLE_ARG)
+	$(MAKE) launcher
+	$(MAKE) core_desktop DESKTOP_TARGETS=$(DESKTOP_TARGET)
+	jbr_jmods="$(JBR_JMODS)"; \
+	if [ -z "$$jbr_jmods" ]; then \
+		jbr_jmods="$$(./run lib jbr $(DESKTOP_TARGET) | tail -n 1)" || exit $$?; \
+	fi; \
+	./release/windows/package.sh $(DESKTOP_TARGET_SCRIPT_ARG) $(WINDOWS_NO_SIGN_SCRIPT_ARG) --jbr-jmods "$$jbr_jmods"
 
 desktop_package_windows_all:
 #	$(MAKE) libcore_desktop DESKTOP_TARGETS=windows/amd64,windows/arm64
@@ -151,13 +170,14 @@ desktop_package_windows_all:
 	$(MAKE) libcore_desktop DESKTOP_TARGETS=windows/amd64
 	$(MAKE) core_desktop DESKTOP_TARGETS=windows/amd64
 	@for desktop_target in $(DESKTOP_TARGETS_WINDOWS); do \
-		$(MAKE) desktop_package_windows DESKTOP_TARGET=$$desktop_target WINDOWS_NO_SIGN=$(WINDOWS_NO_SIGN) || exit $$?; \
+		$(MAKE) desktop_package_windows_jbr DESKTOP_TARGET=$$desktop_target WINDOWS_NO_SIGN=$(WINDOWS_NO_SIGN) || exit $$?; \
 	done
 
-# Thin release jar (the libcore native is excluded). Place husi-core + libhusicore.* next to the
-# jar (or put husi-core on PATH with the library beside that binary) before running.
+# Thin ProGuard-shrunk release jar (the libcore native is excluded). Place husi-core +
+# libhusicore.* next to the jar (or put husi-core on PATH with the library beside that binary)
+# before running.
 desktop_uberjar:
-	BUILD_PLUGIN=none ./gradlew packageUberJarForCurrentOS $(DESKTOP_TARGET_GRADLE_ARG)
+	BUILD_PLUGIN=none ./gradlew packageReleaseUberJarForCurrentOS $(DESKTOP_TARGET_GRADLE_ARG)
 
 aboutlibraries: aboutlibraries_go aboutlibraries_android aboutlibraries_desktop
 
@@ -209,7 +229,7 @@ lint_go_install:
 fmt_go:
 	cd libcore/ && gofumpt -l -w .
 	cd libcore/ && gofmt -s -w .
-	cd libcore/ && gci write --custom-order -s standard -s localmodule -s "prefix(github.com/sagernet/)" -s "default" --skip-generated .
+	cd libcore/ && gci write --custom-order -s standard -s "prefix(github.com/sagernet/)" -s "default" --skip-generated .
 
 fmt_go_install:
 	go install -v mvdan.cc/gofumpt@latest

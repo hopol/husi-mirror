@@ -12,7 +12,6 @@ import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import fr.husi.APP_NAME
 import fr.husi.CLI_STREAM_TIMEOUT
-import fr.husi.CORE_SOCKET_NAME
 import fr.husi.DesktopMain
 import fr.husi.core.CoreClient
 import fr.husi.core.CoreRpcException
@@ -32,30 +31,57 @@ import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.time.temporal.ChronoUnit
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.format.DateTimeComponents
+import kotlinx.datetime.format.format
+import kotlinx.datetime.offsetAt
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.Instant
 
 internal abstract class ApiClientCommand(name: String) : CliktCommand(name) {
     protected val root by requireObject<DesktopMain>()
+    private val api: ApiCommand
+        get() = generateSequence(currentContext) { it.parent }
+            .map { it.command }
+            .filterIsInstance<ApiCommand>()
+            .first()
 
-    /** Connects to the running core host, runs [block], always closes the client. */
     protected fun <T> withClient(block: suspend (CoreClient) -> T): T {
         val base = root.socketBasePath
+        val api = api
+        val url = api.url.trim()
         val client = try {
-            connectExistingClient(base)
+            if (url.isEmpty() || url.equals("local", ignoreCase = true)) {
+                connectExistingHost(base)
+            } else {
+                val serverURL = if (url.contains("://")) {
+                    url
+                } else {
+                    "http://$url"
+                }
+                try {
+                    connectRemoteClient(serverURL, api.secret)
+                } catch (e: Exception) {
+                    echo(
+                        "failed to connect to API service at $serverURL: ${e.message}",
+                        err = true,
+                    )
+                    throw ProgramResult(1)
+                }
+            }
         } catch (e: LinkageError) {
             echo(libcoreLoadFailureMessage(e), err = true)
             throw ProgramResult(1)
+        } catch (e: ProgramResult) {
+            throw e
         } catch (_: Exception) {
             null
         }
         if (client == null) {
-            echo("No running $APP_NAME instance (socket: $base/$CORE_SOCKET_NAME).", err = true)
+            val sockets = hostSocketPaths(base).joinToString()
+            echo("No running $APP_NAME instance (tried: $sockets).", err = true)
             throw ProgramResult(1)
         }
         return try {
@@ -81,6 +107,18 @@ internal abstract class ApiClientCommand(name: String) : CliktCommand(name) {
 }
 
 class ApiCommand : CliktCommand("api") {
+    val url by option(
+        "--url",
+        help = "API service URL. Default: local. Env: BOX_API_URL",
+        envvar = "BOX_API_URL",
+    ).default("", defaultForHelp = "local")
+
+    val secret by option(
+        "--secret",
+        help = "API service secret. Env: BOX_API_SECRET",
+        envvar = "BOX_API_SECRET",
+    ).default("")
+
     init {
         subcommands(
             ApiStatusCommand(),
@@ -94,6 +132,14 @@ class ApiCommand : CliktCommand("api") {
             ApiOpenConnectCommand(),
         )
     }
+
+    override fun aliases() = mapOf(
+        "log" to listOf("logs"),
+        "modes" to listOf("mode"),
+        "outbound" to listOf("outbounds"),
+        "groups" to listOf("group"),
+        "connections" to listOf("connection"),
+    )
 
     override fun help(context: Context) = "API service client"
 
@@ -426,9 +472,11 @@ private class ApiConnectionListCommand : ApiClientCommand("list") {
         )
         for (connection in connections) {
             if (connection.closedAt != 0L) continue
-            table.addRow(*Array(columns.size) { index ->
-                columns[index].value(connection, rates)
-            })
+            table.addRow(
+                *Array(columns.size) { index ->
+                    columns[index].value(connection, rates)
+                },
+            )
         }
         table.flush()
     }
@@ -600,7 +648,13 @@ private fun printLogBatch(
             if (searchQuery.isNotEmpty() && !plainMessage.lowercase().contains(searchQuery)) {
                 continue
             }
-            append(if (isTerminal) entry.message else plainMessage)
+            append(
+                if (stdoutIsTerminal) {
+                    entry.message
+                } else {
+                    plainMessage
+                },
+            )
             append('\n')
         }
     }
@@ -610,15 +664,17 @@ private fun printLogBatch(
 private fun formatDelay(delay: Int): String = if (delay <= 0) "" else "$delay ms"
 
 /**
- * Go's `time.RFC3339` layout has no fractional seconds, while [DateTimeFormatter] prints them
- * whenever the instant carries any — and these timestamps are millisecond precision. Truncate so
- * the output matches sing-box.
+ * Go's `time.RFC3339` layout has no fractional seconds, while the ISO formats print them whenever
+ * the instant carries any — and these timestamps are millisecond precision. Truncate so the output
+ * matches sing-box.
  */
 internal fun formatApiTime(millis: Long): String {
     if (millis == 0L) return ""
-    return DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(
-        Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).truncatedTo(ChronoUnit.SECONDS),
-    )
+    val instant = Instant.fromEpochSeconds(Instant.fromEpochMilliseconds(millis).epochSeconds)
+    val offset = TimeZone.currentSystemDefault().offsetAt(instant)
+    return DateTimeComponents.Formats.ISO_DATE_TIME_OFFSET.format {
+        setDateTimeOffset(instant, offset)
+    }
 }
 
 /** Go's `time.Duration.String()` truncated to seconds (`1h2m3s`), no spaces. */
@@ -637,12 +693,14 @@ internal fun formatGoDuration(duration: Duration): String {
                 append(seconds)
                 append('s')
             }
+
             minutes > 0 -> {
                 append(minutes)
                 append('m')
                 append(seconds)
                 append('s')
             }
+
             else -> {
                 append(seconds)
                 append('s')

@@ -5,12 +5,17 @@ import (
 	"path/filepath"
 	"runtime"
 
+	"github.com/sagernet/sing-box/daemon"
 	"github.com/sagernet/sing-box/log"
 
 	_ "github.com/xchacha20-poly1305/anja"
 )
 
+const APIVersion int32 = daemon.APIVersion
+
 const ProtectPath = "protect_path"
+
+var protectSocketPath = ProtectPath
 
 func InitCore(shouldOperateFiles, truncateLog bool,
 	cachePath, internalAssets, externalAssets string,
@@ -23,6 +28,7 @@ func InitCore(shouldOperateFiles, truncateLog bool,
 	workDir := filepath.Join(cachePath, "../no_backup")
 	_ = os.MkdirAll(workDir, 0o755)
 	_ = os.Chdir(workDir)
+	protectSocketPath = filepath.Join(workDir, ProtectPath)
 	externalAssetsPath = externalAssets
 	internalAssetsPath = internalAssets
 

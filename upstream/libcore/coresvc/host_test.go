@@ -8,16 +8,15 @@ import (
 	"testing"
 	"time"
 
-	"libcore/coresvc"
-	"libcore/distro"
-	"libcore/pb/husi/v1"
-
 	"github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/daemon"
 	"github.com/sagernet/sing/service"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/xchacha20-poly1305/husi/libcore/v2/coresvc"
+	"github.com/xchacha20-poly1305/husi/libcore/v2/distro"
+	"github.com/xchacha20-poly1305/husi/libcore/v2/pb/husi/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -29,7 +28,7 @@ import (
 func testBaseContext(t *testing.T) context.Context {
 	t.Helper()
 	ctx := box.Context(
-		context.Background(),
+		t.Context(),
 		distro.InboundRegistry(),
 		distro.OutboundRegistry(),
 		distro.EndpointRegistry(),
@@ -42,6 +41,18 @@ func testBaseContext(t *testing.T) context.Context {
 	return ctx
 }
 
+type defaultTestBackend struct {
+	coresvc.UnimplementedBackend
+}
+
+func (defaultTestBackend) CheckConfig(string) error { return nil }
+
+func (defaultTestBackend) GenerateSchema(husiv1.SchemaKind) (string, error) {
+	return `{"type":"object"}`, nil
+}
+
+func (defaultTestBackend) BuildEnvironment() string { return "test-env" }
+
 func startTestHost(t *testing.T, opts coresvc.HostOptions) (*coresvc.Host, string) {
 	t.Helper()
 	if opts.Context == nil {
@@ -53,16 +64,8 @@ func startTestHost(t *testing.T, opts coresvc.HostOptions) (*coresvc.Host, strin
 	if opts.LogMaxLines == 0 {
 		opts.LogMaxLines = 100
 	}
-	if opts.CheckConfig == nil {
-		opts.CheckConfig = func(config string) error { return nil }
-	}
-	if opts.GenerateSchema == nil {
-		opts.GenerateSchema = func(kind husiv1.SchemaKind) (string, error) {
-			return `{"type":"object"}`, nil
-		}
-	}
-	if opts.BuildEnvironment == nil {
-		opts.BuildEnvironment = func() string { return "test-env" }
+	if opts.Backend == nil {
+		opts.Backend = defaultTestBackend{}
 	}
 	host, err := coresvc.NewHost(opts)
 	require.NoError(t, err)
@@ -102,7 +105,7 @@ func TestHostHealthAndGetVersion(t *testing.T) {
 	_ = host
 	conn := dialGRPC(t, socketPath)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
 	healthClient := grpc_health_v1.NewHealthClient(conn)
@@ -126,7 +129,7 @@ func TestHostCloseAfterStartReturnsNil(t *testing.T) {
 	host, socketPath := startTestHost(t, coresvc.HostOptions{})
 	conn := dialGRPC(t, socketPath)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
 	// A served RPC guarantees grpc.Server owns the listener, so Close must
@@ -138,15 +141,21 @@ func TestHostCloseAfterStartReturnsNil(t *testing.T) {
 	assert.NoError(t, host.Close())
 }
 
+type generateSchemaBackend struct {
+	coresvc.UnimplementedBackend
+}
+
+func (generateSchemaBackend) GenerateSchema(kind husiv1.SchemaKind) (string, error) {
+	return `{"kind":` + kind.String() + `}`, nil
+}
+
 func TestApplicationServiceGenerateSchema(t *testing.T) {
 	_, socketPath := startTestHost(t, coresvc.HostOptions{
-		GenerateSchema: func(kind husiv1.SchemaKind) (string, error) {
-			return `{"kind":` + kind.String() + `}`, nil
-		},
+		Backend: generateSchemaBackend{},
 	})
 	conn := dialGRPC(t, socketPath)
 	client := husiv1.NewApplicationServiceClient(conn)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
 	for _, kind := range []husiv1.SchemaKind{
@@ -160,15 +169,21 @@ func TestApplicationServiceGenerateSchema(t *testing.T) {
 	}
 }
 
+type checkConfigErrorBackend struct {
+	coresvc.UnimplementedBackend
+}
+
+func (checkConfigErrorBackend) CheckConfig(string) error {
+	return context.Canceled // any error → InvalidArgument
+}
+
 func TestApplicationServiceCheckConfigInvalid(t *testing.T) {
 	_, socketPath := startTestHost(t, coresvc.HostOptions{
-		CheckConfig: func(config string) error {
-			return context.Canceled // any error → InvalidArgument
-		},
+		Backend: checkConfigErrorBackend{},
 	})
 	conn := dialGRPC(t, socketPath)
 	client := husiv1.NewApplicationServiceClient(conn)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
 	_, err := client.CheckConfig(ctx, &husiv1.CheckConfigRequest{Config: "nope"})
@@ -179,7 +194,7 @@ func TestStatusStreamIdleSnapshot(t *testing.T) {
 	_, socketPath := startTestHost(t, coresvc.HostOptions{})
 	conn := dialGRPC(t, socketPath)
 	client := daemon.NewStartedServiceClient(conn)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
 	stream, err := client.SubscribeServiceStatus(ctx, &emptypb.Empty{})
@@ -207,12 +222,12 @@ func TestStartMinimalConfigAndURLTest(t *testing.T) {
   "log": {"level": "warn"},
   "outbounds": [{"type": "direct", "tag": "direct"}]
 }`
-	require.NoError(t, host.StartOrReload(context.Background(), config))
+	require.NoError(t, host.StartOrReload(t.Context(), config))
 	require.True(t, host.HasInstance(), "expected instance after start")
 
 	conn := dialGRPC(t, socketPath)
 	core := husiv1.NewCoreServiceClient(conn)
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
 
 	resp, err := core.URLTest(ctx, &husiv1.URLTestRequest{
@@ -248,10 +263,10 @@ func TestURLTestNotFound(t *testing.T) {
   "log": {"level": "warn"},
   "outbounds": [{"type": "direct", "tag": "direct"}]
 }`
-	require.NoError(t, host.StartOrReload(context.Background(), config))
+	require.NoError(t, host.StartOrReload(t.Context(), config))
 	conn := dialGRPC(t, socketPath)
 	core := husiv1.NewCoreServiceClient(conn)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	_, err := core.URLTest(ctx, &husiv1.URLTestRequest{
 		OutboundTag: "missing-tag",
@@ -269,7 +284,7 @@ func TestHolderStartFailThenStartOK(t *testing.T) {
 	host, socketPath := startTestHost(t, coresvc.HostOptions{})
 
 	// First start fails (invalid config).
-	require.Error(t, host.StartOrReload(context.Background(), `{not json`), "expected StartOrReload to fail on invalid config")
+	require.Error(t, host.StartOrReload(t.Context(), `{not json`), "expected StartOrReload to fail on invalid config")
 
 	// Second start succeeds; URLTest must use the fresh instance context.
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -284,10 +299,10 @@ func TestHolderStartFailThenStartOK(t *testing.T) {
   "log": {"level": "warn"},
   "outbounds": [{"type": "direct", "tag": "direct"}]
 }`
-	require.NoError(t, host.StartOrReload(context.Background(), config))
+	require.NoError(t, host.StartOrReload(t.Context(), config))
 	conn := dialGRPC(t, socketPath)
 	core := husiv1.NewCoreServiceClient(conn)
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
 	resp, err := core.URLTest(ctx, &husiv1.URLTestRequest{
 		OutboundTag: "direct",

@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalAtomicApi::class)
+
 package fr.husi.ui.dashboard
 
 import androidx.compose.foundation.text.input.TextFieldState
@@ -22,7 +24,6 @@ import fr.husi.core.remote.RemoteControlManager
 import fr.husi.core.urlTestOptions
 import fr.husi.database.DataStore
 import fr.husi.ktx.Logs
-import fr.husi.ktx.emptyAsNull
 import fr.husi.ktx.onIoDispatcher
 import fr.husi.ktx.runOnDefaultDispatcher
 import fr.husi.ktx.runOnIoDispatcher
@@ -30,9 +31,9 @@ import fr.husi.proto.daemon.ConnectionEvent
 import fr.husi.proto.daemon.ConnectionEvents
 import fr.husi.proto.daemon.Group
 import fr.husi.proto.daemon.GroupItem
-import fr.husi.utils.PackageResolver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
@@ -41,10 +42,10 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import org.koin.core.context.GlobalContext
+import kotlin.concurrent.atomics.AtomicInt
+import kotlin.concurrent.atomics.AtomicReference
+import kotlin.concurrent.atomics.ExperimentalAtomicApi
 import kotlin.experimental.and
 import kotlin.experimental.inv
 import kotlin.experimental.or
@@ -77,7 +78,10 @@ data class DashboardState(
     val selectedConnection: ConnectionDetailState? = null,
 
     val proxySets: List<ProxySet> = emptyList(),
+    val proxySetOrder: Int = 0,
     val isRemote: Boolean = false,
+
+    val urlTestingTags: Map<String, Int> = emptyMap(),
 ) {
     companion object {
         const val SHOW_TRACKER_ACTIVELY: Byte = 1
@@ -93,6 +97,14 @@ data class NetworkInterfaceInfo(
     val name: String,
     val addresses: List<String>,
 )
+
+object ProxySetOrder {
+    const val ORIGIN = 0
+    const val BY_NAME = 1
+    const val BY_DELAY = 2
+
+    val values get() = listOf(ORIGIN, BY_NAME, BY_DELAY)
+}
 
 @Immutable
 data class ProxySet(
@@ -134,12 +146,6 @@ data class ProxyItem(
     val urlTestDelay: Int = -1,
 )
 
-internal data class ProcessInfo(
-    val packageName: String,
-    val label: String,
-    val icon: Any? = null,
-)
-
 @Stable
 class DashboardViewModel(
     private val loadPlatformNetworkInfo: suspend () -> Triple<List<NetworkInterfaceInfo>, String?, String?>,
@@ -165,12 +171,13 @@ class DashboardViewModel(
     /** The connection whose detail sheet is open, if any. */
     private var selectedUuid: String? = null
 
-    private val proxySetsByTag = HashMap<String, ProxySet>()
     private var latestGroups: List<Group> = emptyList()
     private var latestOutbounds: List<GroupItem> = emptyList()
 
     companion object {
         private val LOOP_INTERVAL = 1000L.milliseconds
+
+        private const val GROUP_URL_TEST_CONCURRENCY = 10
     }
 
     init {
@@ -210,6 +217,16 @@ class DashboardViewModel(
                 .collectLatest { updateConnectionsSnapshot() }
         }
         viewModelScope.launch {
+            DataStore.configurationStore.intFlow(Key.PROXY_SET_ORDER)
+                .collectLatest { order ->
+                    proxySetComparator.store(buildProxySetComparator(order))
+                    uiState.update { state ->
+                        state.copy(proxySetOrder = order)
+                    }
+                    publishProxySets()
+                }
+        }
+        viewModelScope.launch {
             DefaultNetworkListener.start(this@DashboardViewModel) {
                 refreshNetworkInterfaces()
             }
@@ -245,10 +262,7 @@ class DashboardViewModel(
     private var outboundsJob: Job? = null
     private var connectionsJob: Job? = null
     private var clashModeJob: Job? = null
-    private val processLabelAccess = Mutex()
-    private val processLabelCache = mutableMapOf<String, String>()
-    private val processIconCache = mutableMapOf<String, Any>()
-    private val processIconAccess = Mutex()
+    private val processInfoResolver = ProcessInfoResolver()
 
     suspend fun initialize(isConnected: Boolean) {
         statusJob?.cancel()
@@ -257,7 +271,6 @@ class DashboardViewModel(
         connectionsJob?.cancel()
         clashModeJob?.cancel()
         connections.clear()
-        proxySetsByTag.clear()
         latestGroups = emptyList()
         latestOutbounds = emptyList()
         uiState.update { state ->
@@ -371,14 +384,7 @@ class DashboardViewModel(
             DefaultNetworkListener.stop(this@DashboardViewModel)
         }
         super.onCleared()
-        runBlocking {
-            processLabelAccess.withLock {
-                processLabelCache.clear()
-            }
-            processIconAccess.withLock {
-                processIconCache.clear()
-            }
-        }
+        processInfoResolver.clear()
     }
 
     fun togglePause() {
@@ -431,6 +437,10 @@ class DashboardViewModel(
         }
     }
 
+    fun setProxySetOrder(order: Int) = viewModelScope.launch(Dispatchers.Default) {
+        DataStore.proxySetOrder = order
+    }
+
     fun setQueryActivate(queryActivate: Boolean) = runOnIoDispatcher {
         val old = uiState.value.queryOptions
         DataStore.trafficConnectionQuery = if (queryActivate) {
@@ -454,16 +464,35 @@ class DashboardViewModel(
             state.copy(
                 proxySets = state.proxySets.map {
                     if (it.id == group) {
-                        val updated = it.copy(urlTestProgress = progress)
-                        if (!it.isAll) {
-                            proxySetsByTag[it.tag] = updated
-                        }
-                        updated
+                        it.copy(urlTestProgress = progress)
                     } else {
                         it
                     }
                 },
             )
+        }
+    }
+
+    private fun markUrlTesting(tag: String, testing: Boolean) {
+        uiState.update { state ->
+            val counts = state.urlTestingTags
+            val next = (counts[tag] ?: 0) + if (testing) 1 else -1
+            state.copy(
+                urlTestingTags = if (next > 0) {
+                    counts + (tag to next)
+                } else {
+                    counts - tag
+                },
+            )
+        }
+    }
+
+    private suspend fun <T> withUrlTesting(tag: String, block: suspend () -> T): T {
+        markUrlTesting(tag, true)
+        try {
+            return block()
+        } finally {
+            markUrlTesting(tag, false)
         }
     }
 
@@ -566,34 +595,8 @@ class DashboardViewModel(
     internal suspend fun resolveProcessInfo(process: String?, uid: Int): ProcessInfo? {
         if (isRemote) return null
         return onIoDispatcher {
-            if (process.isNullOrBlank() && uid < 0) return@onIoDispatcher null
-            PackageResolver.awaitLoad()
-            val packageName = resolvePackageName(process, uid) ?: return@onIoDispatcher null
-            if (!PackageResolver.isAppInstalled(packageName)) return@onIoDispatcher null
-            val label = processLabelAccess.withLock {
-                processLabelCache[packageName]
-                    ?: PackageResolver.loadAppLabel(packageName)
-                        ?.also { processLabelCache[packageName] = it }
-            } ?: return@onIoDispatcher null
-            val icon = processIconAccess.withLock {
-                processIconCache[packageName]
-                    ?: PackageResolver.loadAppIcon(packageName)
-                        ?.also { processIconCache[packageName] = it }
-            }
-            ProcessInfo(packageName = packageName, label = label, icon = icon)
+            processInfoResolver.resolve(process, uid)
         }
-    }
-
-    private fun resolvePackageName(process: String?, uid: Int): String? {
-        process.emptyAsNull()?.let { packageName ->
-            if (PackageResolver.isAppInstalled(packageName)) {
-                return packageName
-            }
-        }
-        if (uid >= 0) {
-            return PackageResolver.findPackagesForUid(uid)?.firstOrNull()
-        }
-        return null
     }
 
     private fun handleConnectionEvents(events: ConnectionEvents) {
@@ -708,66 +711,66 @@ class DashboardViewModel(
             || processes?.any { it.contains(query) } == true
             || uid.toString().contains(query)
 
+    private var proxySetComparator = AtomicReference(buildProxySetComparator(ProxySetOrder.ORIGIN))
+
+    private fun buildProxySetComparator(order: Int): Comparator<ProxyItem>? {
+        return when (order) {
+            ProxySetOrder.BY_NAME -> compareBy { it.tag }
+            ProxySetOrder.BY_DELAY -> compareBy {
+                if (it.urlTestDelay > 0) {
+                    it.urlTestDelay
+                } else {
+                    Int.MAX_VALUE
+                }
+            }
+
+            else -> null
+        }
+    }
+
     private fun publishProxySets() {
-        val olds = uiState.value.proxySets
-        if (proxySetsByTag.isEmpty() && olds.isNotEmpty()) {
-            for (old in olds) {
-                if (!old.isAll) {
-                    proxySetsByTag[old.tag] = old
-                }
-            }
-        }
-        val fresh = latestGroups.map { group ->
-            ProxySet(
-                tag = group.tag,
-                type = proxyDisplayName(group.type),
-                selectable = group.selectable,
-                selected = group.selected,
-                items = group.itemsList.map { item ->
-                    ProxyItem(
-                        tag = item.tag,
-                        type = proxyDisplayName(item.type),
-                        urlTestDelay = item.urlTestDelay,
-                    )
-                },
-            )
-        }
-        val allItems = latestOutbounds.map { item ->
-            ProxyItem(
-                tag = item.tag,
-                type = proxyDisplayName(item.type),
-                urlTestDelay = item.urlTestDelay,
-            )
-        }
-        val allSet = allProxySet(allItems).copy(
-            urlTestProgress = olds.firstOrNull { it.isAll }?.urlTestProgress,
-        )
-        if (fresh.isEmpty()) {
-            proxySetsByTag.clear()
-            uiState.update { state -> state.copy(proxySets = listOf(allSet)) }
-            return
-        }
-        val freshTags = HashSet<String>(fresh.size)
-        val result = buildList(fresh.size) {
-            for (item in fresh) {
-                freshTags.add(item.tag)
-                val old = proxySetsByTag[item.tag]
-                val merged = if (old == null) {
-                    item
-                } else {
-                    item.copy(urlTestProgress = old.urlTestProgress)
-                }
-                val reused = if (old != null && merged == old) {
-                    old
-                } else {
-                    merged
-                }
-                proxySetsByTag[item.tag] = reused
-                add(reused)
-            }
-        }
-        proxySetsByTag.keys.retainAll(freshTags)
         uiState.update { state ->
+            val olds = state.proxySets
+            val comparator = proxySetComparator.load()
+            val fresh = latestGroups.map { group ->
+                ProxySet(
+                    tag = group.tag,
+                    type = proxyDisplayName(group.type),
+                    selectable = group.selectable,
+                    selected = group.selected,
+                    items = group.itemsList.map { item ->
+                        ProxyItem(
+                            tag = item.tag,
+                            type = proxyDisplayName(item.type),
+                            urlTestDelay = item.urlTestDelay,
+                        )
+                    }.let { items ->
+                        comparator?.let { items.sortedWith(it) } ?: items
+                    },
+                )
+            }
+            val allItems = latestOutbounds.map { item ->
+                ProxyItem(
+                    tag = item.tag,
+                    type = proxyDisplayName(item.type),
+                    urlTestDelay = item.urlTestDelay,
+                )
+            }.let { items ->
+                comparator?.let { items.sortedWith(it) } ?: items
+            }
+            val oldAll = olds.firstOrNull { it.isAll }
+            val freshAll = allProxySet(allItems).copy(urlTestProgress = oldAll?.urlTestProgress)
+            // Keep the previous instance while nothing changed, so the list does not recompose.
+            val allSet = oldAll?.takeIf { it == freshAll } ?: freshAll
+            if (fresh.isEmpty()) {
+                return@update state.copy(proxySets = listOf(allSet))
+            }
+            val oldsByTag = olds.filterNot { it.isAll }.associateBy { it.tag }
+            val result = fresh.map { item ->
+                val old = oldsByTag[item.tag] ?: return@map item
+                val merged = item.copy(urlTestProgress = old.urlTestProgress)
+                if (merged == old) old else merged
+            }
             state.copy(
                 proxySets = buildList(result.size + 1) {
                     add(allSet)
@@ -800,15 +803,17 @@ class DashboardViewModel(
 
     fun urlTestForSingle(tag: String) = viewModelScope.launch(Dispatchers.IO) {
         try {
-            if (isRemote) {
-                coreClient.daemonUrlTest(tag)
-            } else {
-                coreClient.urlTest(
-                    tag,
-                    DataStore.connectionTestURL,
-                    DataStore.connectionTestTimeout,
-                    testOptions(),
-                )
+            withUrlTesting(tag) {
+                if (isRemote) {
+                    coreClient.daemonUrlTest(tag)
+                } else {
+                    coreClient.urlTest(
+                        tag,
+                        DataStore.connectionTestURL,
+                        DataStore.connectionTestTimeout,
+                        testOptions(),
+                    )
+                }
             }
         } catch (e: Exception) {
             Logs.w(e)
@@ -837,18 +842,37 @@ class DashboardViewModel(
         val testTimeout = DataStore.connectionTestTimeout
         val options = testOptions()
         try {
-            for ((index, item) in items.withIndex()) {
-                setUrlTestProgress(
-                    id,
-                    GroupUrlTestProgress(
-                        current = index + 1,
-                        total = items.size,
-                    ),
-                )
-                try {
-                    coreClient.urlTest(item.tag, testURL, testTimeout, options)
-                } catch (e: Exception) {
-                    Logs.w(e)
+            val nextItemIndex = AtomicInt(0)
+            val finishedCount = AtomicInt(0)
+            setUrlTestProgress(id, GroupUrlTestProgress(current = 0, total = items.size))
+            coroutineScope {
+                repeat(items.size.coerceAtMost(GROUP_URL_TEST_CONCURRENCY)) {
+                    launch {
+                        while (true) {
+                            val index = nextItemIndex.fetchAndAdd(1)
+                            if (index >= items.size) break
+                            val tag = items[index].tag
+                            try {
+                                withUrlTesting(tag) {
+                                    coreClient.urlTest(
+                                        tag,
+                                        testURL,
+                                        testTimeout,
+                                        options,
+                                    )
+                                }
+                            } catch (e: Exception) {
+                                Logs.w(e)
+                            }
+                            setUrlTestProgress(
+                                id,
+                                GroupUrlTestProgress(
+                                    current = finishedCount.addAndFetch(1),
+                                    total = items.size,
+                                ),
+                            )
+                        }
+                    }
                 }
             }
         } catch (e: Exception) {
@@ -882,9 +906,9 @@ internal fun skipGroupUrlTest(item: ProxyItem): Boolean {
 
 internal const val SPEED_HISTORY_SIZE = 30
 
-internal fun idleSpeedHistory(): List<Float> = List(SPEED_HISTORY_SIZE) { 0f }
+private fun idleSpeedHistory(): List<Float> = List(SPEED_HISTORY_SIZE) { 0f }
 
-internal fun nextSpeedHistory(history: List<Float>, sample: Float): List<Float> {
+private fun nextSpeedHistory(history: List<Float>, sample: Float): List<Float> {
     val sized = if (history.size == SPEED_HISTORY_SIZE) {
         history
     } else {

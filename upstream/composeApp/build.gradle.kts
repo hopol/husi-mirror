@@ -130,7 +130,7 @@ data class DesktopTarget(
         )
     val composeTrayNativeKeepPrefixes: Set<String> =
         setOf(
-            "composetray/native/${platform.jnaName}-${arch.jnaName}/",
+            "composetray/native/${platform.jnaName}-${arch.nucleusName}/",
         )
     val nucleusNativeKeepPrefixes: Set<String> =
         setOf(
@@ -359,7 +359,6 @@ kotlin {
                 implementation(libs.smali.dexlib2.get().toString()) {
                     exclude(group = "com.google.guava", module = "guava")
                 }
-                implementation(libs.guava)
 
                 implementation(libs.process.phoenix)
 
@@ -388,7 +387,7 @@ kotlin {
                 implementation(libs.clikt)
                 implementation(libs.kotlinx.coroutines.swing)
                 implementation(libs.nucleus.composetray)
-                implementation(libs.nucleus.application)
+                implementation(libs.nucleus.core.runtime)
                 implementation(libs.nucleus.notification)
                 implementation(libs.nucleus.darkmode.detector)
                 implementation(libs.nucleus.autolaunch)
@@ -396,13 +395,6 @@ kotlin {
             }
         }
     }
-}
-
-// The tray links the Tao window backend transitively; husi stays on the AWT backend
-// (see DesktopMain), so keep Tao off the classpath entirely — with it present,
-// nucleusApplication's Auto backend resolution would prefer Tao.
-configurations.named("desktopMainImplementation") {
-    exclude(group = "dev.nucleusframework", module = "nucleus.decorated-window-tao")
 }
 
 compose.desktop {
@@ -418,6 +410,9 @@ compose.desktop {
             vendor = "Husi contributors"
             copyright = "GPL-3.0-or-later"
             licenseFile.set(rootProject.layout.projectDirectory.file("LICENSE"))
+        }
+        buildTypes.release.proguard {
+            configurationFiles.from(project.file("r8-desktop.pro"))
         }
     }
 }
@@ -441,6 +436,7 @@ val mergeDesktopAboutLibraries = tasks.register<Sync>("mergeDesktopAboutLibrarie
 }
 
 aboutLibraries {
+    offlineMode = true
     collect {
         // Desktop-only presets are merged in only for exportLibraryDefinitionsDesktop.
         configPath = if (exportDesktopAboutLibraries) {
@@ -474,7 +470,7 @@ dependencies {
     add("kspDesktop", libs.androidx.room.compiler)
 }
 
-tasks.matching { it.name == "packageUberJarForCurrentOS" }.configureEach {
+tasks.matching { it.name == "packageReleaseUberJarForCurrentOS" }.configureEach {
     if (this is Jar) {
         // Exclude non-target native binaries from dependency family buckets.
         // libcore natives/** are always stripped (thin release jar); others keep only the target arch.

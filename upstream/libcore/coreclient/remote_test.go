@@ -7,13 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"libcore/coreclient"
-
 	"github.com/sagernet/sing-box/daemon"
 	N "github.com/sagernet/sing/common/network"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/xchacha20-poly1305/husi/libcore/v2/coreclient"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/health"
@@ -121,7 +120,7 @@ func TestDialRemoteProbeAndEcho(t *testing.T) {
 	require.NoError(t, err)
 	defer client.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	require.NoError(t, client.Probe(ctx))
 
@@ -144,7 +143,7 @@ func TestDialRemoteWrongSecretUnauthenticated(t *testing.T) {
 	require.NoError(t, err)
 	defer client.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	err = client.Probe(ctx)
 	require.Error(t, err)

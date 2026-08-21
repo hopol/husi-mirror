@@ -101,29 +101,9 @@ sqlite-bundled has no binary for them, so the app cannot open its database there
 [issuetracker 495864182](https://issuetracker.google.com/issues/495864182) for `osx_x64` and
 [issuetracker 426464784](https://issuetracker.google.com/issues/426464784) for `windows_arm64`.
 
-For Linux desktop targets, the build includes `with_naive_outbound` and consults a
-[`cronet-go`](https://github.com/sagernet/cronet-go) checkout via `build-naive env`. If `CRONET_GO_ROOT` is unset,
-`libcore/build.sh` first checks `../../cronet-go`, then falls back to `$HOME/cronet-go`:
-
-```shell
-CRONET_GO_ROOT=/path/to/cronet-go make libcore
-```
-
-For Linux targets, `cronet-go` exports the naiveproxy cross-toolchain environment directly.
-For Darwin targets on a Darwin host, `libcore/build.sh` keeps `with_naive_outbound` and derives `CC`/`CXX`/`CGO_*`
-from the Chromium clang and hermetic Xcode toolchain inside the `cronet-go` checkout. If the Darwin SDK/linker tree
-is missing, the desktop build fails immediately.
-For Darwin targets on non-Darwin hosts, `libcore/build.sh` uses `zig cc` / `zig c++`, requires an explicit macOS SDK
-path via `DARWIN_SDK` or `--darwinsdk`, exports the matching `CGO_*` sysroot/library flags, keeps
-`with_naive_outbound`, and does not require a `cronet-go` checkout, so `zig` must be available in `PATH`.
-
-If `cronet-go` isn't available and you don't need the naive outbound protocol (e.g. in a restricted build
-environment), pass `NO_NAIVE=1` (or `--no-naive` to `libcore/build.sh` directly) to drop `with_naive_outbound`
-from the build tags and skip the cronet-go toolchain setup entirely:
-
-```shell
-NO_NAIVE=1 make libcore_desktop DESKTOP_TARGETS=linux/amd64
-```
+Linux desktop targets use `zig cc` / `zig c++` with a glibc 2.31 target for the `with_naive_outbound` build; the
+required prebuilt Cronet library is downloaded through Go modules, so no `cronet-go` checkout is needed. Darwin
+targets use Xcode on macOS, or Zig plus an explicit macOS SDK path via `DARWIN_SDK` or `--darwinsdk` on other hosts.
 
 Desktop Gradle builds select `composeApp/libs/libcore-desktop-<platform>-<arch>.jar` automatically from the current
 `os.name` and `os.arch`.
@@ -239,7 +219,7 @@ This dispatches to the host-native packaging flow:
 * macOS: `make desktop_package_macos`
 * Windows/MSYS: `make desktop_package_windows`
 
-Build an **uber JAR** that runs on system Java (no bundled JRE/runtime image):
+Build a ProGuard-shrunk **uber JAR** that runs on system Java (no bundled JRE/runtime image):
 
 ```shell
 make desktop_uberjar
@@ -280,15 +260,51 @@ You can select target formats:
 make desktop_package_linux LINUX_PACKAGE_FORMATS=deb,pacman
 ```
 
-Besides `deb`, `rpm` and `pacman`, there is `tarball`: the relocatable app subtree
-as a `.tar.zst`, for portable installs and for distributions the native formats do
-not cover. It is not built by default, but releases ship it. It needs `tar` and
-`zstd`, and unpacks to a directory holding the jar, the launcher, `husi-core` and
-`libhusicore.so` — run `bin/husi-core service install` from there to get the daemon.
-The native packages install and enable that daemon themselves, so only the tarball
-needs the manual step. Either way the Settings entry can do it instead, but that
-route goes through `pkexec` and so needs polkit; without it, run the command as
-root.
+### Installing without root
+
+`deb`, `rpm` and `pacman` all need a package manager and therefore root. Two other
+formats do not, which is what makes husi usable on a managed machine — a lab, a
+work laptop, a school computer:
+
+`tarball` is the relocatable app subtree as a `.tar.zst`. It needs `tar` and
+`zstd` to build, and unpacks to a directory holding the jar, the launcher,
+`husi-core`, `libhusicore.so` and its own installer:
+
+```shell
+./install.sh                     # installs under ~/.local, no root anywhere
+./install.sh --with-daemon       # ... and installs the daemon too, via pkexec
+./install.sh --prefix /opt/husi  # or somewhere else entirely
+```
+
+`install.sh` copies the tree to `<prefix>/lib`, symlinks `<prefix>/bin`, and
+registers a desktop entry and icon under `$XDG_DATA_HOME` with absolute paths, so
+the application menu and the URL schemes work whether or not `<prefix>/bin` is on
+`PATH`. It leaves a matching `uninstall.sh` next to the installed tree. Without
+`--with-daemon` nothing ever asks for privileges; husi still runs as a local
+proxy, and only TUN needs the daemon, which Settings can install later.
+
+`appimage` is a single self-contained file. Unlike every other Linux format it
+bundles its own Java runtime — linked with `jlink` from the JDK modules the app
+actually uses (the module list is shared with the Windows JBR packages, in
+[`release/desktop/jre-modules.sh`](release/desktop/jre-modules.sh)) — so it does not require a system Java 21 at all. Its glibc floor
+comes from that bundled runtime rather than from the launcher, which is static
+musl. Building one additionally needs `jlink`, `appimagetool` and an `objcopy`
+for the target architecture; cross-building also needs that architecture's JDK
+modules, since `jlink` links a runtime for the target, not for the host:
+
+```shell
+make desktop_package_linux DESKTOP_TARGET=linux/arm64 \
+    LINUX_PACKAGE_FORMATS=appimage \
+    JLINK_JMODS=/path/to/aarch64-jdk/jmods \
+    APPIMAGE_RUNTIME=/path/to/runtime-aarch64
+```
+
+Neither format is built by default, but releases ship both.
+
+The daemon is the one privileged piece in all of this. The native packages install
+and enable it themselves; everywhere else it is an explicit, optional step, either
+`--with-daemon`, the Settings entry, or `husi-core service install` as root. The
+first two go through `pkexec` and so need polkit.
 
 Linux desktop data directory is `$XDG_CONFIG_HOME/husi/` if set, otherwise
 `$HOME/.config/husi/`.
@@ -408,6 +424,39 @@ The installer runs `husi-core.exe service install` from its own directory at the
 the Program Files copy — that is why the same two files exist twice. The uninstaller reverses both, calling
 `husi-core.exe service uninstall` before removing its own directory. It does not pass `--purge`, so `%ProgramData%\husi`
 survives an uninstall; remove it by hand, or run `husi-core service uninstall --purge` yourself beforehand.
+
+##### ☕ Packages with a bundled runtime
+
+Both of the above ask the machine for a Java 21. A second pair does not.
+`make desktop_package_windows_jbr` still writes the thin zip and installer from
+the same signed payloads, and additionally:
+
+```shell
+make desktop_package_windows_jbr DESKTOP_TARGET=windows/amd64
+```
+
+* `<PACKAGE_NAME>-<VERSION_NAME>-windows-<arch>-jbr.zip`
+* `<PACKAGE_NAME>-<VERSION_NAME>-windows-<arch>-jbr-installer.exe`
+
+These carry a `runtime\` directory next to the launcher, linked with `jlink` from the modules of the
+[JetBrains Runtime](https://github.com/JetBrains/JetBrainsRuntime) — the JDK IntelliJ ships, whose Skia, HiDPI and font
+rendering work is exactly what Compose Desktop wants. The launcher prefers that runtime over anything installed on the
+machine; only the `JAVA` environment variable overrides it.
+
+The modules are fetched into `build/jbr/` on demand, pinned by `JBR_VERSION` / `JBR_BUILD` in
+`buildScript/init/version.sh`. Fetch them yourself, or point the packaging at a copy you already have:
+
+```shell
+./run lib jbr windows/amd64
+make desktop_package_windows_jbr DESKTOP_TARGET=windows/amd64 JBR_JMODS=/path/to/jbrsdk/jmods
+```
+
+Building these additionally needs `jlink` on `PATH`. Its feature version has to be at least the JetBrains Runtime's —
+`jlink` cannot read modules newer than itself — which is why `JBR_VERSION` tracks `JAVA_VERSION`. Nothing else about the
+host matters: `jlink` links an image for the platform its modules belong to, so the Windows runtime is linked on the
+Linux release runner like everything else.
+
+The bundled runtime is signed by JetBrains, not by this project; the code signing below covers our own payloads only.
 
 ##### 🔏 Windows code signing
 

@@ -9,25 +9,36 @@ import (
 	"testing"
 	"time"
 
-	"libcore/coreclient"
-	"libcore/coresvc"
-	"libcore/distro"
-	"libcore/pb/husi/v1"
-
 	"github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/daemon"
 	"github.com/sagernet/sing/service"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/xchacha20-poly1305/husi/libcore/v2/coreclient"
+	"github.com/xchacha20-poly1305/husi/libcore/v2/coresvc"
+	"github.com/xchacha20-poly1305/husi/libcore/v2/distro"
+	"github.com/xchacha20-poly1305/husi/libcore/v2/pb/husi/v1"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
+type stubBackend struct {
+	coresvc.UnimplementedBackend
+}
+
+func (stubBackend) CheckConfig(string) error { return nil }
+
+func (stubBackend) GenerateSchema(husiv1.SchemaKind) (string, error) {
+	return "{}", nil
+}
+
+func (stubBackend) BuildEnvironment() string { return "test" }
+
 func startHost(t *testing.T) (socketPath string, cleanup func()) {
 	t.Helper()
 	ctx := box.Context(
-		context.Background(),
+		t.Context(),
 		distro.InboundRegistry(),
 		distro.OutboundRegistry(),
 		distro.EndpointRegistry(),
@@ -40,11 +51,7 @@ func startHost(t *testing.T) (socketPath string, cleanup func()) {
 		Context:     ctx,
 		Version:     "bridge-test",
 		LogMaxLines: 50,
-		CheckConfig: func(string) error { return nil },
-		GenerateSchema: func(husiv1.SchemaKind) (string, error) {
-			return "{}", nil
-		},
-		BuildEnvironment: func() string { return "test" },
+		Backend:     stubBackend{},
 	})
 	require.NoError(t, err)
 	socketPath = filepath.Join(t.TempDir(), coresvc.Socket)
@@ -72,7 +79,7 @@ func TestBridgeInvokeGetVersion(t *testing.T) {
 
 	req, err := proto.Marshal(&emptypb.Empty{})
 	require.NoError(t, err)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	respBytes, err := client.Invoke(ctx, daemon.StartedService_GetVersion_FullMethodName, req)
 	require.NoError(t, err)
@@ -105,7 +112,7 @@ func TestBridgeStreamServiceStatus(t *testing.T) {
 		},
 		onClosed: func(string) { close(done) },
 	}
-	stream, err := client.Stream(context.Background(), daemon.StartedService_SubscribeServiceStatus_FullMethodName, req, handler)
+	stream, err := client.Stream(t.Context(), daemon.StartedService_SubscribeServiceStatus_FullMethodName, req, handler)
 	require.NoError(t, err)
 	// Wait for first message.
 	deadline := time.Now().Add(3 * time.Second)
@@ -130,7 +137,7 @@ func TestProbeAgainstStoppedSocket(t *testing.T) {
 		return
 	}
 	defer client.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
 	defer cancel()
 	require.Error(t, client.Probe(ctx), "expected probe failure against missing socket")
 }
@@ -167,7 +174,7 @@ func TestStreamCloseReleasesGoroutine(t *testing.T) {
 			onMessage: func([]byte) {},
 			onClosed:  func(string) { close(done) },
 		}
-		stream, err := client.Stream(context.Background(), daemon.StartedService_SubscribeServiceStatus_FullMethodName, req, handler)
+		stream, err := client.Stream(t.Context(), daemon.StartedService_SubscribeServiceStatus_FullMethodName, req, handler)
 		require.NoError(t, err)
 		stream.Close()
 		select {

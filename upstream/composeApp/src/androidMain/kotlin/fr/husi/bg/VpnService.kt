@@ -84,14 +84,23 @@ class VpnService : BaseVpnService(),
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (DataStore.serviceMode == Key.MODE_VPN) {
             if (prepare(this) != null) {
-                startActivity(
-                    Intent(this, VpnRequestActivity::class.java)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                )
+                requestVpnPermission()
             } else return super<BaseService.Interface>.onStartCommand(intent, flags, startId)
         }
         stopRunner()
         return START_NOT_STICKY
+    }
+
+    /**
+     * Hands the VPN consent dialog to the user. The direct launch only lands when the caller
+     * happens to be exempt from the background activity limits, so a notification backs it up.
+     */
+    private fun requestVpnPermission() {
+        startActivity(
+            Intent(this, VpnRequestActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+        runBlocking { VpnRequestNotification.show(this@VpnService) }
     }
 
     inner class NullConnectionException : NullPointerException(),
@@ -198,8 +207,8 @@ class VpnService : BaseVpnService(),
         val proxyApps = DataStore.proxyApps
         var bypass = DataStore.bypassMode
         val workaroundSYSTEM = false /* DataStore.tunImplementation == TunImplementation.SYSTEM */
-        val needBypassRootUid = workaroundSYSTEM || data.proxy!!.config.trafficMap.values.any {
-            it[0].hysteriaBean?.protocol == HysteriaBean.PROTOCOL_FAKETCP
+        val needBypassRootUid = workaroundSYSTEM || data.proxy!!.config.trafficProfiles.any {
+            it.hysteriaBean?.protocol == HysteriaBean.PROTOCOL_FAKETCP
         }
 
         if (proxyApps || needBypassRootUid) {

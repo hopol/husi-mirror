@@ -29,11 +29,12 @@ Common targets:
 | `make core_desktop DESKTOP_TARGETS=...`                     | Build the Zig `husi-core` shim (source: `libcore/shim/`) into `libcore/build/<os>_<arch>/` (next to the sidecar) |
 | `make apk` / `make apk_debug`                               | Assemble `androidApp:assembleFossRelease` / `Debug`                              |
 | `make desktop` / `make desktop_release`                     | Run Compose desktop app via `gradlew :composeApp:run[Release]`                   |
-| `make desktop_uberjar`                                      | Thin release jar (no libcore native); needs the `husi-core` shim **and** `libhusicore.*` next to the jar, or `husi-core` on `PATH` with the library next to that binary |
+| `make desktop_uberjar`                                      | Thin ProGuard-shrunk release jar (no libcore native); needs the `husi-core` shim **and** `libhusicore.*` next to the jar, or `husi-core` on `PATH` with the library next to that binary |
 | `make desktop_package[_linux/_macos/_windows]`              | Native packages under `composeApp/build/compose/packages/`                       |
+| `make desktop_package_windows_jbr DESKTOP_TARGET=...`       | Thin Windows zip/NSIS plus a -jbr pair with a jlink JetBrains Runtime (no system Java); modules fetched by `./run lib jbr <target>` into `build/jbr/` |
 | `make launcher`                                             | Build the Zig native UI launcher from `launcher/` (used by Linux/macOS/Windows installers) |
 | `make plugin PLUGIN=<name>`                                 | Assemble plugin APK; valid names: `hysteria2 juicity naive mieru shadowquic`     |
-| `make aboutlibraries`                                       | Regenerate OSS license metadata (run before release)                             |
+| `make aboutlibraries`                                       | Regenerate committed OSS license JSON (Gradle plugin is offline; run before release) |
 | `make generate_option`                                      | Regenerate sing-box option mappings (boxoption); output piped through `$CLIP`    |
 | `make proto`                                                | Re-vendor sing-box schema and regenerate Go gRPC stubs under `libcore/pb/` via `protoc`       |
 | `make proto_install`                                        | Print instructions for installing `protoc`                                       |
@@ -44,13 +45,8 @@ Makefile does).
 
 Cross-compiling desktop libcore: pass `JNI_INCLUDE=/path/to/jni` when JNI headers aren't
 auto-detected; for Darwin targets on non-Darwin hosts also pass `DARWIN_SDK=/path/to/MacOSX.sdk` (
-uses `zig cc`). Linux desktop builds pull in `cronet-go` for naive outbound — set `CRONET_GO_ROOT`
-if it's not in `../../cronet-go` or `$HOME/cronet-go`.
-
-In restricted environments without a `cronet-go` checkout (or without network access to fetch
-one), pass `NO_NAIVE=1` to `make libcore` / `make libcore_desktop` (or `--no-naive` to
-`libcore/build.sh` directly) to drop the `with_naive_outbound` build tag and skip the cronet-go
-toolchain setup entirely. The resulting build omits the naive outbound protocol.
+uses `zig cc`). Linux desktop builds use Zig for naive outbound, while the required prebuilt Cronet
+library is downloaded through Go modules.
 
 Desktop Gradle picks the libcore jar from `os.name`/`os.arch`; override with
 `./gradlew -p composeApp run -PdesktopTarget=linux/amd64`. A missing jar fails Gradle sync (and any
@@ -122,7 +118,8 @@ single Go test: `cd libcore && go test -run TestName ./pkg/...`. Install Go tool
     - `libcore/coreclient/` is the raw gRPC bridge (`Invoke`/`Stream`/`Probe` with a
       passthrough proto codec). Bound as `BridgeClient` for Kotlin.
     - `libcore/cmd/` holds `boxoption` (option codegen), `boxversion`, `licencecollect`,
-      `ruleset_generate`. `libcore/plugin/` houses Go-side plugin support: outbound adapters (
+      `ruleset_generate`, `prototrim` (the vendored-schema trimmer `make proto` runs).
+      `libcore/plugin/` houses Go-side plugin support: outbound adapters (
       `http`, `juicity`, `trusttunnel`, `vless`), plus `mieruproto` (Mieru traffic-pattern
       protobuf), `raybridge` (*ray-compatible API shim), `plugindns` (plugin DNS conn plumbing), and
       `pluginoption` (option types/constants for hooked protocols).
@@ -130,11 +127,17 @@ single Go test: `cd libcore && go test -run TestName ./pkg/...`. Install Go tool
       `protoc`.
 - `proto/` — the gRPC contract between the UI and the core host, and the single source of truth for
   it. Two trees, generated the same way but owned differently:
-    - `daemon/started_service.proto` is **vendored verbatim from the pinned sing-box** by
-      `make proto` (only Java options are injected, which never reach the wire). It is the
-      core-scoped surface — status, log, connections, groups, clash mode, OpenConnect — so husi
-      stays wire compatible with the original sing-box daemon, and the Go side reuses
-      `github.com/sagernet/sing-box/daemon` instead of regenerating it. Never edit it by hand.
+    - `daemon/started_service.proto` is **vendored from the pinned sing-box** by `make proto`
+      (only Java options are injected, which never reach the wire). It is the core-scoped
+      surface — status, log, connections, groups, clash mode, OpenConnect — so husi stays wire
+      compatible with the original sing-box daemon, and the Go side reuses
+      `github.com/sagernet/sing-box/daemon` instead of regenerating it. The copy is trimmed to
+      the RPCs husi calls, because the whole tree is compiled into JVM classes shipped in the
+      app: `buildScript/proto.sh` holds the `KEEP_STARTED_SERVICE_RPCS` allowlist (the same
+      list as the method constants in `fr.husi.core.CoreClient`) and `libcore/cmd/prototrim`
+      copies those RPCs plus every type they reach, line for line.
+      Using a new upstream RPC means adding it to that list and re-running `make proto`; an
+      allowlisted RPC that upstream renamed or dropped fails the run. Never edit it by hand.
     - `husi/v1/*.proto` is husi's own: what sing-box has no place for (plugin processes, pushed
       assets, husi's URL test knobs, schema generation).
   Both share one protoc include path for the `:proto` Gradle module, which generates the
@@ -165,8 +168,11 @@ single Go test: `cd libcore && go test -run TestName ./pkg/...`. Install Go tool
   `plugin/<name>.sh`, `init/{env,env_ndk,version}.sh`, plus `rename.sh` for forking under a new
   package name.
 - `release/{linux,macos,windows}/package.sh` — invoked by `make desktop_package_*` after the uber
-  jar exists. Linux packaging uses `nfpm`; Windows packaging Authenticode signs its payloads via
-  `release/windows/codesign.sh`.
+  jar exists. Linux packaging uses `nfpm` for `deb`/`rpm`/`pacman`; the two root-free formats are
+  `tarball` (ships `release/linux/desktop/install.sh`, which installs under `~/.local`) and
+  `appimage` (bundles a `jlink` runtime, so it needs no system Java — `release/linux/appimage/`).
+  Windows packaging Authenticode signs its payloads via `release/windows/codesign.sh`; its NSIS
+  installer is per-user (`RequestExecutionLevel user`) and only elevates for the optional service.
 
 ## Compose UI (composeApp)
 
@@ -254,9 +260,36 @@ Canonical conventions live in [CONTRIBUTING.md](./CONTRIBUTING.md). Read it firs
   checked against it — see `release/windows/README.md` for the fingerprints. Nothing in the code
   reads that file: `VerifyCorePairSignature` compares the shim against its own library rather than
   pinning a certificate, so the published fingerprint is for humans, not for the daemon. Keep the
-  private key out of the repository.
+  private key out of the repository. The runtime bundled into the `-jbr` packages is signed by
+  JetBrains and is not re-signed here; nothing in husi checks it.
+- Bundled Java runtimes (the Linux AppImage and the Windows `-jbr` packages) are linked by `jlink`
+  from one shared module list, `release/desktop/jre-modules.sh`. `jlink` links an image for the
+  platform its modules belong to, so both are produced on the Linux release runner. The Windows
+  variant deliberately omits `--strip-native-debug-symbols` (objcopy only understands ELF) and
+  `--generate-cds-archive` (cannot be generated cross-platform). `JBR_VERSION` in
+  `buildScript/init/version.sh` has to track `JAVA_VERSION`: the host `jlink` cannot read modules
+  newer than itself.
 - `composeApp/executableSo/` is added as a JNI libs source dir for the Android app (used to bundle
   plugin executables alongside the host APK).
+- `make aboutlibraries` (`aboutlibraries_go` + `aboutlibraries_android` +
+  `aboutlibraries_desktop`) rewrites the committed OSS metadata at
+  `composeApp/src/{android,desktop}Main/composeResources/files/aboutlibraries.json`. The UI
+  loads those files at runtime; regular `make apk` / `make desktop` do not regenerate them.
+  The AboutLibraries Gradle plugin runs with `offlineMode = true` and will not download SPDX
+  license texts (or any other remote license data). Full texts are vendored as
+  `composeApp/src/commonMain/aboutlibraries/licenses/<SPDX-id>.json` (shared) and
+  `composeApp/src/desktopMain/aboutlibraries/licenses/` (desktop-only, currently the LGPLs).
+  `hash` / `spdxId` must be the SPDX id that library presets reference (e.g.
+  `GPL-3.0-or-later`). Go module presets from `libcore/cmd/licencecollect` only carry those
+  ids, no body; without a matching file here, the next export ships empty `content` and the
+  OSS screen falls back to opening the license URL. Add a new JSON when a dependency
+  introduces a license that is not already vendored and is not already present in a Maven
+  POM. `aboutlibraries_go` is offline too: `licencecollect` scans the license files of every
+  module in the local module cache with `github.com/google/licensecheck`, so run
+  `go mod download` in `libcore` first — it never downloads anything itself. Do not
+  run `exportLibraryDefinitions` and `exportLibraryDefinitionsDesktop` in one Gradle
+  invocation: `configPath` is chosen from the start-parameter task names, so both tasks would
+  share the desktop merge output.
 - `make proto` re-vendors the sing-box schema and regenerates the Go stubs for `husi/v1` only via
   `protoc` — a second copy of `daemon/started_service.proto` in the binary would panic the
   protobuf registry. The protoc plugins are pinned by the `tool` block in `libcore/go.mod` rather

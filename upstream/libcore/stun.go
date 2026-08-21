@@ -3,23 +3,24 @@ package libcore
 import (
 	"context"
 
-	"libcore/pb/husi/v1"
-
 	"github.com/sagernet/sing-box/common/stun"
 	E "github.com/sagernet/sing/common/exceptions"
 	N "github.com/sagernet/sing/common/network"
-	"github.com/sagernet/sing/protocol/socks"
+
+	"github.com/xchacha20-poly1305/husi/libcore/v2/coresvc"
+	"github.com/xchacha20-poly1305/husi/libcore/v2/pb/husi/v1"
+	"github.com/xchacha20-poly1305/husi/libcore/v2/simpleproxyurl"
 )
 
 func runSTUNTest(
 	ctx context.Context,
 	server, proxy string,
-	emit func(*husiv1.STUNTestResponse) error,
+	sender coresvc.STUNTestSender,
 ) error {
 	var dialer N.Dialer
 	if proxy != "" {
 		var err error
-		dialer, err = socks.NewClientFromURL(new(N.DefaultDialer), proxy)
+		dialer, err = simpleproxyurl.ProxyFromURL(ctx, proxy)
 		if err != nil {
 			return E.Cause(err, "create proxy dialer")
 		}
@@ -29,13 +30,13 @@ func runSTUNTest(
 		Dialer:  dialer,
 		Context: ctx,
 		OnProgress: func(progress stun.Progress) {
-			_ = emit(stunResponseFromProgress(progress, false))
+			_ = sender.Send(stunResponseFromProgress(progress, false))
 		},
 	})
 	if err != nil {
 		return err
 	}
-	return emit(&husiv1.STUNTestResponse{
+	return sender.Send(&husiv1.STUNTestResponse{
 		ExternalAddress:  result.ExternalAddr,
 		LatencyMs:        result.LatencyMs,
 		Mapping:          toProtoNATMapping(result.NATMapping),

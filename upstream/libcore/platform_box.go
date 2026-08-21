@@ -8,10 +8,6 @@ import (
 	"sync"
 	"syscall"
 
-	"libcore/oscall"
-	"libcore/procfs"
-	"libcore/protect"
-
 	"github.com/sagernet/sing-box/adapter"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
@@ -21,6 +17,9 @@ import (
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/common/logger"
 	N "github.com/sagernet/sing/common/network"
+
+	"github.com/xchacha20-poly1305/husi/libcore/v2/oscall"
+	"github.com/xchacha20-poly1305/husi/libcore/v2/procfs"
 )
 
 type boxPlatformInterfaceWrapper struct {
@@ -55,11 +54,7 @@ func (w *boxPlatformInterfaceWrapper) UsePlatformAutoDetectInterfaceControl() bo
 }
 
 func (w *boxPlatformInterfaceWrapper) AutoDetectInterfaceControl(fd int) error {
-	// "protect"
-	ok := w.iif.AutoDetectInterfaceControl(int32(fd))
-	if !ok {
-		_ = protect.Protect(ProtectPath, fd)
-	}
+	_ = w.iif.AutoDetectInterfaceControl(int32(fd))
 	return nil
 }
 
@@ -250,6 +245,10 @@ func (w *boxPlatformInterfaceWrapper) UsePlatformNotification() bool {
 }
 
 func (w *boxPlatformInterfaceWrapper) SendNotification(_ *adapter.Notification) error {
+	return nil
+}
+
+func (w *boxPlatformInterfaceWrapper) CancelNotification(identifier string, typeID int32) error {
 	return nil
 }
 

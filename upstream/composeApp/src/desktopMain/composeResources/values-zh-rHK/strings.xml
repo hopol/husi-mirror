@@ -3,10 +3,12 @@
     <string name="auto_connect_summary_desktop">登入系統時啟動並自動連接</string>
     <string name="tun_interface_name">Tun 介面名稱</string>
     <string name="tun_interface_name_summary">留空則使用 sing-box 預設值</string>
+    <string name="forced_search_process">強制搜尋程序</string>
+    <string name="forced_search_process_summary">在連線中顯示程序資訊</string>
     <string name="install_daemon">安裝守護程序</string>
     <string name="install_daemon_summary">安裝 TUN 模式所需的特權系統服務</string>
     <string name="update_daemon">更新守護程序</string>
-    <string name="update_daemon_summary">守護程序 API 版本與應用程式不符，請更新以恢復控制</string>
+    <string name="update_daemon_summary">守護程序 API 版本與應用程式不同，可更新守護程序</string>
     <string name="daemon_installed_summary">已安裝並已連接</string>
     <string name="daemon_install_success">守護程序已安裝</string>
     <string name="daemon_install_cancelled">已取消安裝守護程序</string>

@@ -5,8 +5,6 @@ import (
 	"errors"
 	"time"
 
-	"libcore/pb/husi/v1"
-
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/common/urltest"
 	C "github.com/sagernet/sing-box/constant"
@@ -15,6 +13,7 @@ import (
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/service"
 
+	"github.com/xchacha20-poly1305/husi/libcore/v2/pb/husi/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -27,10 +26,7 @@ type coreService struct {
 }
 
 func (s *coreService) GetVersion(ctx context.Context, _ *husiv1.GetVersionRequest) (*husiv1.GetVersionResponse, error) {
-	buildEnv := ""
-	if s.host.buildEnvironment != nil {
-		buildEnv = s.host.buildEnvironment()
-	}
+	buildEnv := s.host.backend.BuildEnvironment()
 	return &husiv1.GetVersionResponse{
 		Version:          s.host.version,
 		SingBoxVersion:   C.Version,

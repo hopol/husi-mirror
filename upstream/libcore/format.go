@@ -7,8 +7,6 @@ import (
 	"time"
 	_ "unsafe"
 
-	"libcore/distro"
-
 	"github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/option"
@@ -17,6 +15,9 @@ import (
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/common/json"
 	"github.com/sagernet/sing/service"
+
+	"github.com/xchacha20-poly1305/husi/libcore/v2/distro"
+	"github.com/xchacha20-poly1305/husi/libcore/v2/plugin/protect"
 )
 
 func baseContext(platformInterface PlatformInterface) context.Context {
@@ -102,6 +103,9 @@ func CheckConfig(configContent string) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	service.MustRegister[adapter.PlatformInterface](ctx, platformInterfaceStub{})
+	service.MustRegister[protect.Protector](ctx, protect.ProtectorFunc(func(_ int) error {
+		return nil
+	}))
 	instance, err := box.New(box.Options{
 		Options: options,
 		Context: ctx,

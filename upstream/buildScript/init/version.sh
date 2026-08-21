@@ -2,20 +2,28 @@
 
 GO_VERSION="1.26.6"
 JAVA_VERSION="21"
+# https://github.com/JetBrains/JetBrainsRuntime
+# Bundled into the Windows JBR packages. The feature version has to stay
+# equal to JAVA_VERSION: the host jlink links these jmods, and jlink cannot
+# read jmods newer than itself.
+JBR_VERSION="21.0.11"
+JBR_BUILD="1163.116"
 ANDROID_NDK_VERSION="r29"
 # ANDROID_NDK_VERSION as named by sdkmanager under $ANDROID_HOME/ndk/
 ANDROID_NDK_FULL_VERSION="29.0.14206865"
 ZIG_VERSION="0.16.0"
 NFPM_VERSION="2.47.0"
+APPIMAGETOOL_VERSION="1.9.1"
+# https://github.com/AppImage/type2-runtime
+APPIMAGE_RUNTIME_VERSION="20251108"
 PROTOC_VERSION="35.1"
 JNI_HEADERS_VERSION="21"
 JNI_HEADERS_COMMIT="68b16cb0252c32b66b28f7260439970cec24ba04"
 MACOS_SDK_VERSION="26.5"
 MACOS_SDK_COMMIT="896cd40df984b847d486723edce50e247385617e"
-CRONET_GO_COMMIT="e1d173257b86d732479dda28cc0746ba33030afe"
 
 # https://github.com/Dreamacro/maxmind-geoip
 GEOIP_VERSION="20260812"
 
 # https://github.com/v2fly/domain-list-community
-GEOSITE_VERSION="20260814022505"
+GEOSITE_VERSION="20260816111744"

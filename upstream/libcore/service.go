@@ -3,17 +3,15 @@ package libcore
 import (
 	"sync"
 
-	"libcore/coresvc"
-	"libcore/pb/husi/v1"
-	"libcore/plugin/pluginoption"
-	"libcore/pluginpool"
-	"libcore/protect"
-
 	C "github.com/sagernet/sing-box/constant"
-	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/service"
+
+	"github.com/xchacha20-poly1305/husi/libcore/v2/coresvc"
+	"github.com/xchacha20-poly1305/husi/libcore/v2/pb/husi/v1"
+	"github.com/xchacha20-poly1305/husi/libcore/v2/plugin/pluginoption"
+	"github.com/xchacha20-poly1305/husi/libcore/v2/pluginpool"
 )
 
 type Service struct {
@@ -22,7 +20,6 @@ type Service struct {
 	platformInterface  PlatformInterface
 	appHandler         coresvc.AppHandler
 	host               *coresvc.Host
-	protect            *protect.Service
 	pluginPool         *pluginpool.PluginPool
 	pluginFatalHandler PluginFatalHandler
 	// pluginWorkingDir is the parent directory for transient URL-test plugin
@@ -47,24 +44,9 @@ func (s *Service) buildHost() (*coresvc.Host, error) {
 		Version:     s.version,
 		LogMaxLines: currentLogMaxLines(),
 		AppHandler:  s.appHandler,
-		CheckConfig: CheckConfig,
-		GenerateSchema: func(kind husiv1.SchemaKind) (string, error) {
-			switch kind {
-			case husiv1.SchemaKind_SCHEMA_KIND_CONFIG:
-				return generateSchema[option.Options]()
-			case husiv1.SchemaKind_SCHEMA_KIND_OUTBOUND:
-				return generateSchema[option.Outbound]()
-			case husiv1.SchemaKind_SCHEMA_KIND_DNS_RULE:
-				return generateSchema[option.DNSRule]()
-			default:
-				return "", E.New("unknown schema kind: ", kind.String())
-			}
-		},
-		StandaloneURLTest: s.standaloneURLTest,
-		BuildEnvironment:  BuildEnvironment,
-		FileLogSink:       fileLogSink(),
+		Backend:     &serviceBackend{service: s},
+		FileLogSink: fileLogSink(),
 	}
-	WireApplicationTools(&opts)
 	return coresvc.NewHost(opts)
 }
 
@@ -83,7 +65,6 @@ func (s *Service) Start() error {
 		return err
 	}
 	s.host = host
-	startProtectService(s)
 	return nil
 }
 
@@ -92,7 +73,6 @@ func (s *Service) Close() error {
 	defer s.access.Unlock()
 	s.closePluginPoolLocked()
 	return common.Close(
-		common.PtrOrNil(s.protect),
 		common.PtrOrNil(s.host),
 	)
 }
