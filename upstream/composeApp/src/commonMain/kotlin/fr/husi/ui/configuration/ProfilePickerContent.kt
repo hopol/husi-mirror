@@ -49,7 +49,6 @@ import fr.husi.compose.material3.Tab
 import fr.husi.compose.material3.Text
 import fr.husi.database.DataStore
 import fr.husi.database.ProfileManager
-import fr.husi.ktx.onIoDispatcher
 import fr.husi.resources.Res
 import fr.husi.resources.cancel
 import fr.husi.resources.close
@@ -58,7 +57,9 @@ import fr.husi.resources.search_go
 import fr.husi.ui.LocalSnackbarEmitter
 import fr.husi.ui.SnackbarEmitter
 import fr.husi.ui.SnackbarEmitterEffect
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.jetbrains.compose.resources.stringResource
 import org.jetbrains.compose.resources.vectorResource
 
@@ -88,7 +89,9 @@ fun rememberProfilePickerState(
 ): ProfilePickerState {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val focusManager = LocalFocusManager.current
-    var selectedGroup by rememberSaveable { mutableLongStateOf(DataStore.selectedGroup) }
+    var selectedGroup by rememberSaveable {
+        mutableLongStateOf(DataStore.selectedGroup.getBlocking())
+    }
     val pagerState = rememberPagerState(
         initialPage = uiState.groups
             .indexOfFirst { it.id == selectedGroup }
@@ -99,11 +102,11 @@ fun rememberProfilePickerState(
     var lastPage by remember { mutableIntStateOf(pagerState.currentPage) }
 
     LaunchedEffect(preSelected) {
-        val initialProfile = preSelected ?: DataStore.selectedProxy
-        val initialGroup = onIoDispatcher {
+        val initialProfile = preSelected ?: DataStore.selectedProxy.get()
+        val initialGroup = withContext(Dispatchers.IO) {
             initialProfile.takeIf { it > 0 }?.let { ProfileManager.getProfile(it)?.groupId }
         }
-        selectedGroup = initialGroup ?: DataStore.selectedGroup
+        selectedGroup = initialGroup ?: DataStore.selectedGroup.get()
         viewModel.scrollToProxy(initialProfile)
     }
     LaunchedEffect(selectedGroup, uiState.groups) {
@@ -129,7 +132,6 @@ fun rememberProfilePickerState(
         if (isPageRestored) {
             selectedGroup = groupId
         }
-        viewModel.requestFocusIfNotHave(groupId)
     }
 
     return ProfilePickerState(
@@ -229,6 +231,7 @@ fun ProfilePickerContent(
                     showActions = false,
                     onProfileSelect = onSelected,
                     bottomPadding = bottomPadding,
+                    canHoldFocus = searchBarState.currentValue != SearchBarValue.Expanded,
                 )
             }
 
@@ -247,6 +250,7 @@ fun ProfilePickerContent(
                         onSelected(id)
                     },
                     bottomPadding = 0.dp,
+                    canHoldFocus = false,
                 )
             }
 

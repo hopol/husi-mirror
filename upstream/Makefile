@@ -16,6 +16,7 @@ LINUX_PACKAGE_FORMATS ?= deb,rpm,pacman
 HOST_OS = $(shell uname -s)
 DESKTOP_TARGET_GRADLE_ARG = $(if $(DESKTOP_TARGET),-PdesktopTarget=$(DESKTOP_TARGET),)
 DESKTOP_TARGET_SCRIPT_ARG = $(if $(DESKTOP_TARGET),--target $(DESKTOP_TARGET),)
+DESKTOP_APP_ARGS = $(if $(strip $(ARGS)),--args="$(ARGS)",)
 JNI_INCLUDE_SCRIPT_ARG = $(if $(JNI_INCLUDE),--jniinclude "$(JNI_INCLUDE)",)
 DARWIN_SDK_SCRIPT_ARG = $(if $(DARWIN_SDK),--darwinsdk "$(DARWIN_SDK)",)
 WINDOWS_NO_SIGN_SCRIPT_ARG = $(if $(filter 1,$(WINDOWS_NO_SIGN)),--no-sign,)
@@ -33,7 +34,7 @@ COMMA = ,
 CORE_SHIM_GLIBC_VERSION = 2.17
 CORE_SHIM_MACOS_VERSION = 12.0
 
-.PHONY: libcore libcore_android libcore_desktop_common libcore_desktop core_desktop aboutlibraries aboutlibraries_go aboutlibraries_android aboutlibraries_desktop apk apk_debug assets desktop desktop_release desktop_package desktop_package_linux desktop_package_linux_all desktop_package_macos desktop_package_windows desktop_package_windows_jbr desktop_package_windows_all desktop_uberjar launcher lint_go proto proto_install test_go test_no_go_core_binary test_zig plugin generate_option lint_go_linux lint_go_android lint_go_windows
+.PHONY: libcore libcore_android libcore_desktop_common libcore_desktop core_desktop aboutlibraries aboutlibraries_go aboutlibraries_android aboutlibraries_desktop apk apk_debug assets desktop desktop_release desktop_package desktop_package_linux desktop_package_linux_all desktop_package_macos desktop_package_windows desktop_package_windows_jbr desktop_package_windows_all desktop_uberjar launcher lint_go proto proto_install test_go test_no_go_core_binary test_zig plugin generate_option lint_go_linux lint_go_android lint_go_windows lint_go_install fmt_go fmt_go_install
 
 build: libcore_android assets apk
 
@@ -94,10 +95,10 @@ core_desktop:
 	done
 
 desktop:
-	BUILD_PLUGIN=none ./gradlew -p composeApp run
+	BUILD_PLUGIN=none ./gradlew -p composeApp run $(DESKTOP_APP_ARGS)
 
 desktop_release:
-	BUILD_PLUGIN=none ./gradlew -p composeApp runRelease
+	BUILD_PLUGIN=none ./gradlew -p composeApp runRelease $(DESKTOP_APP_ARGS)
 
 desktop_package:
 ifeq ($(HOST_OS),Linux)
@@ -227,13 +228,9 @@ lint_go_install:
 	go install -v github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
 
 fmt_go:
-	cd libcore/ && gofumpt -l -w .
-	cd libcore/ && gofmt -s -w .
-	cd libcore/ && gci write --custom-order -s standard -s "prefix(github.com/sagernet/)" -s "default" --skip-generated .
+	cd libcore/ && golangci-lint fmt ./...
 
-fmt_go_install:
-	go install -v mvdan.cc/gofumpt@latest
-	go install -v github.com/daixiang0/gci@latest
+fmt_go_install: lint_go_install
 
 test: test_gradle test_go test_no_go_core_binary test_zig
 

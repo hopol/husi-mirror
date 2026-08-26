@@ -6,15 +6,16 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.AnnotatedString
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import fr.husi.CONNECTION_TEST_URL
 import fr.husi.CertProvider
-import fr.husi.Key
 import fr.husi.compose.IconMaskColors
+import fr.husi.compose.collectAsStateWithLifecycle
 import fr.husi.compose.IconMaskShapes
 import fr.husi.compose.LinkOrContentTextField
+import fr.husi.compose.ListPreference
 import fr.husi.compose.MaskedIcon
-import fr.husi.compose.PreferenceDivider
+import fr.husi.compose.SliderPreference
+import fr.husi.compose.SwitchPreference
+import fr.husi.compose.TextFieldPreference
 import fr.husi.compose.material3.Text
 import fr.husi.database.DataStore
 import fr.husi.ktx.contentOrUnset
@@ -38,11 +39,7 @@ import fr.husi.resources.timer
 import fr.husi.ui.DisableProcessTextPreference
 import fr.husi.ui.HideLauncherIconPreference
 import fr.husi.ui.PlatformMiscOptions
-import me.zhanghai.compose.preference.ListPreference
 import me.zhanghai.compose.preference.ListPreferenceType
-import me.zhanghai.compose.preference.SliderPreference
-import me.zhanghai.compose.preference.SwitchPreference
-import me.zhanghai.compose.preference.TextFieldPreference
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 
@@ -51,12 +48,10 @@ internal fun MiscSettingsGroup(
     needReload: () -> Unit,
     needRestart: () -> Unit,
 ) {
-    val connectionTestUrlValue by DataStore.configurationStore
-        .stringFlow(Key.CONNECTION_TEST_URL, CONNECTION_TEST_URL)
-        .collectAsStateWithLifecycle(CONNECTION_TEST_URL)
+    val connectionTestUrlValue by DataStore.connectionTestURL.collectAsStateWithLifecycle()
     TextFieldPreference(
         value = connectionTestUrlValue,
-        onValueChange = { DataStore.connectionTestURL = it },
+        onValueChange = { DataStore.connectionTestURL.setBlocking(it) },
         title = { Text(stringResource(Res.string.connection_test_url)) },
         textToValue = { it },
         icon = {
@@ -70,15 +65,12 @@ internal fun MiscSettingsGroup(
     ) { value, onValueChange, onOk ->
         LinkOrContentTextField(value, onValueChange, onOk)
     }
-    PreferenceDivider()
 
-    val connectionTestConcurrentValue by DataStore.configurationStore
-        .intFlow(Key.CONNECTION_TEST_CONCURRENT, 5)
-        .collectAsStateWithLifecycle(5)
+    val connectionTestConcurrentValue by DataStore.connectionTestConcurrent.collectAsStateWithLifecycle()
     var concurrentPreview by remember { mutableFloatStateOf(connectionTestConcurrentValue.toFloat()) }
     SliderPreference(
         value = connectionTestConcurrentValue.toFloat(),
-        onValueChange = { DataStore.connectionTestConcurrent = it.toInt() },
+        onValueChange = { DataStore.connectionTestConcurrent.setBlocking(it.toInt()) },
         sliderValue = concurrentPreview,
         onSliderValueChange = { concurrentPreview = it },
         title = { Text(stringResource(Res.string.test_concurrency)) },
@@ -92,15 +84,12 @@ internal fun MiscSettingsGroup(
         },
         valueText = { Text(concurrentPreview.toInt().toString()) },
     )
-    PreferenceDivider()
 
-    val connectionTestTimeoutValue by DataStore.configurationStore
-        .intFlow(Key.CONNECTION_TEST_TIMEOUT, 3000)
-        .collectAsStateWithLifecycle(3000)
+    val connectionTestTimeoutValue by DataStore.connectionTestTimeout.collectAsStateWithLifecycle()
     var timeoutPreview by remember { mutableFloatStateOf(connectionTestTimeoutValue.toFloat()) }
     SliderPreference(
         value = connectionTestTimeoutValue.toFloat(),
-        onValueChange = { DataStore.connectionTestTimeout = it.toInt() },
+        onValueChange = { DataStore.connectionTestTimeout.setBlocking(it.toInt()) },
         sliderValue = timeoutPreview,
         onSliderValueChange = { timeoutPreview = it },
         title = { Text(stringResource(Res.string.test_timeout)) },
@@ -111,15 +100,12 @@ internal fun MiscSettingsGroup(
         },
         valueText = { Text(timeoutPreview.toInt().toString()) },
     )
-    PreferenceDivider()
 
-    val connectionTestUnifiedDelay by DataStore.configurationStore
-        .booleanFlow(Key.CONNECTION_TEST_UNIFIED_DELAY, false)
-        .collectAsStateWithLifecycle(false)
+    val connectionTestUnifiedDelay by DataStore.connectionTestUnifiedDelay.collectAsStateWithLifecycle()
     SwitchPreference(
         value = connectionTestUnifiedDelay,
         onValueChange = {
-            DataStore.connectionTestUnifiedDelay = it
+            DataStore.connectionTestUnifiedDelay.setBlocking(it)
             needReload()
         },
         title = { Text(stringResource(Res.string.connection_test_unified_delay)) },
@@ -127,15 +113,12 @@ internal fun MiscSettingsGroup(
             MaskedIcon(Res.drawable.timer, IconMaskColors.IconLightGreen)
         },
     )
-    PreferenceDivider()
 
-    val connectionTestIgnoreHandshakeTime by DataStore.configurationStore
-        .booleanFlow(Key.CONNECTION_TEST_IGNORE_HANDSHAKE_TIME, false)
-        .collectAsStateWithLifecycle(false)
+    val connectionTestIgnoreHandshakeTime by DataStore.connectionTestIgnoreHandshakeTime.collectAsStateWithLifecycle()
     SwitchPreference(
         value = connectionTestIgnoreHandshakeTime,
         onValueChange = {
-            DataStore.connectionTestIgnoreHandshakeTime = it
+            DataStore.connectionTestIgnoreHandshakeTime.setBlocking(it)
             needReload()
         },
         title = { Text(stringResource(Res.string.connection_test_ignore_handshake_time)) },
@@ -144,11 +127,8 @@ internal fun MiscSettingsGroup(
         },
     )
     PlatformMiscOptions(needReload)
-    PreferenceDivider()
 
-    val certProviderValue by DataStore.configurationStore
-        .intFlow(Key.CERT_PROVIDER, CertProvider.MOZILLA)
-        .collectAsStateWithLifecycle(CertProvider.MOZILLA)
+    val certProviderValue by DataStore.certProvider.collectAsStateWithLifecycle()
 
     fun certProviderTextRes(index: Int): StringResource = when (index) {
         CertProvider.SYSTEM -> Res.string.follow_system
@@ -160,7 +140,7 @@ internal fun MiscSettingsGroup(
     ListPreference(
         value = certProviderValue,
         onValueChange = {
-            DataStore.certProvider = it
+            DataStore.certProvider.setBlocking(it)
             needRestart()
         },
         values = listOf(
@@ -181,7 +161,6 @@ internal fun MiscSettingsGroup(
         type = ListPreferenceType.DROPDOWN_MENU,
         valueToText = { AnnotatedString(stringResource(certProviderTextRes(it))) },
     )
-    PreferenceDivider()
 
     DisableProcessTextPreference()
     HideLauncherIconPreference()

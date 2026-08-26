@@ -19,7 +19,6 @@ import fr.husi.database.SagerDatabase
 import fr.husi.ktx.Logs
 import fr.husi.ktx.broadcastReceiver
 import fr.husi.ktx.hasPermission
-import fr.husi.ktx.onMainDispatcher
 import fr.husi.ktx.readableMessage
 import fr.husi.ktx.runOnDefaultDispatcher
 import fr.husi.ktx.runOnMainDispatcher
@@ -28,10 +27,12 @@ import fr.husi.plugin.PluginNotFoundException
 import fr.husi.repository.resolveRepository
 import fr.husi.resources.*
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.net.UnknownHostException
 import kotlin.time.Duration.Companion.milliseconds
@@ -120,7 +121,7 @@ class BaseService {
                 Action.RESET_UPSTREAM_CONNECTIONS -> runOnDefaultDispatcher {
                     withTimeoutOrNull(1000.milliseconds) {
                         resetNetwork()
-                        onMainDispatcher {
+                        withContext(Dispatchers.Main) {
                             collapseStatusBar(ctx)
                             showToast(resolveRepository().getString(Res.string.have_reset_network))
                         }
@@ -173,7 +174,7 @@ class BaseService {
         }
 
         fun reload() {
-            if (DataStore.selectedProxy == 0L) {
+            if (DataStore.selectedProxy.getBlocking() == 0L) {
                 stopRunner(false, runBlocking { resolveRepository().getString(Res.string.profile_empty) })
                 return
             }
@@ -296,7 +297,7 @@ class BaseService {
                 wakeLock = null
             }
 
-            if (DataStore.acquireWakeLock) {
+            if (DataStore.acquireWakeLock.get()) {
                 acquireWakeLock()
                 data.notification.onWakeLock(true)
             } else {
@@ -311,14 +312,14 @@ class BaseService {
             val data = data
             if (data.state != ServiceState.Stopped) return Service.START_NOT_STICKY
             data.notification = createNotifier("")
-            val profile = runBlocking { SagerDatabase.proxyDao.getById(DataStore.selectedProxy) }
+            val profile = runBlocking { SagerDatabase.proxyDao.getById(DataStore.selectedProxy.getBlocking()) }
             this as Context
             if (profile == null) { // gracefully shutdown: https://stackoverflow.com/q/47337857/2245107
                 stopRunner(false, runBlocking { resolveRepository().getString(Res.string.profile_empty) })
                 return Service.START_NOT_STICKY
             }
 
-            setBootReceiverEnabled(DataStore.persistAcrossReboot)
+            setBootReceiverEnabled(DataStore.persistAcrossReboot.getBlocking())
             if (!data.closeReceiverRegistered) {
                 val filter = IntentFilter().apply {
                     addAction(Action.RELOAD)
@@ -355,7 +356,7 @@ class BaseService {
                     Executable.killAll()    // clean up old processes
                     preInit()
                     data.backend.init(profile)
-                    DataStore.currentProfile = profile.id
+                    DataStore.currentProfile.set(profile.id)
 
                     startProcesses()
                     data.changeState(ServiceState.Connected)
@@ -368,7 +369,7 @@ class BaseService {
                     Logs.e(e)
                     stopRunner(false, resolveRepository().getString(Res.string.invalid_server))
                 } catch (e: PluginNotFoundException) {
-                    onMainDispatcher {
+                    withContext(Dispatchers.Main) {
                         showToast(e.readableMessage)
                     }
                     Logs.w(e)

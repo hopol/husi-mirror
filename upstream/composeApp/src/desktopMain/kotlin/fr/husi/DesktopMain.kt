@@ -238,9 +238,13 @@ class DesktopMain(
 
             val windowState = rememberWindowState(size = DpSize(1200.dp, 800.dp))
 
-            fun openWindow() {
-                windowVisible = true
-                windowState.isMinimized = false
+            // The tray library keys its native rebuild on this reference, so a fresh lambda
+            // every recomposition would re-render the icon and rebuild the menu each time.
+            val openWindow: () -> Unit = remember(windowState) {
+                {
+                    windowVisible = true
+                    windowState.isMinimized = false
+                }
             }
 
             LaunchedEffect(Unit) {
@@ -284,16 +288,23 @@ class DesktopMain(
                 val textServiceMode = stringResource(Res.string.service_mode)
                 val textServiceModeProxy = stringResource(Res.string.service_mode_proxy)
                 val textServiceModeVpn = stringResource(Res.string.service_mode_vpn)
-                val serviceMode by DataStore.configurationStore
-                    .stringFlow(Key.SERVICE_MODE, Key.MODE_VPN)
+                val serviceMode by DataStore.serviceMode.flow()
                     .collectAsState(Key.MODE_VPN)
+
+                fun setServiceMode(mode: String) {
+                    if (DataStore.serviceMode.getBlocking() == mode) return
+                    DataStore.serviceMode.setBlocking(mode)
+                    if (serviceStatus.state.canStop) {
+                        repository.reloadService()
+                    }
+                }
 
                 val textExit = stringResource(Res.string.exit)
                 val iconClose = painterResource(Res.drawable.close)
                 Tray(
                     icon = iconServiceActive,
                     tooltip = appName,
-                    primaryAction = ::openWindow,
+                    primaryAction = openWindow,
                     menuContent = {
                         Item(
                             label = serviceStatus.profileName ?: appName,
@@ -301,41 +312,31 @@ class DesktopMain(
                         ) {
                             openWindow()
                         }
-                        CheckableItem(
+                        Item(
                             label = switchText,
-                            checked = serviceStatus.state == ServiceState.Connected
-                                    || serviceStatus.state == ServiceState.Stopped
-                                    || serviceStatus.state == ServiceState.Idle,
-                            onCheckedChange = {
-                                when (serviceStatus.state) {
-                                    ServiceState.Stopped -> repository.startService()
-                                    ServiceState.Idle, ServiceState.Connected -> repository.stopService()
-                                    else -> {}
-                                }
-                            },
                             shortcut = KeyShortcut(TrayKey.Return, ctrl = true),
-                        )
+                        ) {
+                            when (serviceStatus.state) {
+                                ServiceState.Stopped -> repository.startService()
+                                ServiceState.Idle, ServiceState.Connected -> repository.stopService()
+                                else -> {}
+                            }
+                        }
                         SubMenu(
                             label = textServiceMode,
                         ) {
                             CheckableItem(
                                 label = textServiceModeProxy,
                                 checked = serviceMode == Key.MODE_PROXY,
-                                onCheckedChange = {
-                                    if (serviceMode != Key.MODE_PROXY) {
-                                        DataStore.serviceMode = Key.MODE_PROXY
-                                        repository.reloadService()
-                                    }
+                                onCheckedChange = { isSelected ->
+                                    if (isSelected) setServiceMode(Key.MODE_PROXY)
                                 },
                             )
                             CheckableItem(
                                 label = textServiceModeVpn,
                                 checked = serviceMode == Key.MODE_VPN,
-                                onCheckedChange = {
-                                    if (serviceMode != Key.MODE_VPN) {
-                                        DataStore.serviceMode = Key.MODE_VPN
-                                        repository.reloadService()
-                                    }
+                                onCheckedChange = { isSelected ->
+                                    if (isSelected) setServiceMode(Key.MODE_VPN)
                                 },
                             )
                         }
@@ -369,8 +370,8 @@ class DesktopMain(
 
     private fun shouldAutoConnectOnLaunch(): Boolean {
         return launchedAtLogin
-                && DataStore.persistAcrossReboot
-                && DataStore.selectedProxy > 0L
+                && DataStore.persistAcrossReboot.getBlocking()
+                && DataStore.selectedProxy.getBlocking() > 0L
                 && !DataStore.serviceState.started
     }
 
@@ -464,7 +465,7 @@ class DesktopMain(
         val filesDir = repository.filesDir.invariantDirectoryPathString()
         val externalAssetsDir = repository.externalAssetsDir.invariantDirectoryPathString()
 
-        val rulesProvider = DataStore.rulesProvider
+        val rulesProvider = DataStore.rulesProvider.getBlocking()
         val isOfficialProvider = rulesProvider == RuleProvider.OFFICIAL
         if (isOfficialProvider) {
             runBlocking {
@@ -480,12 +481,12 @@ class DesktopMain(
                 cacheDir,
                 filesDir,
                 externalAssetsDir,
-                DataStore.logMaxLine,
-                logLevel ?: DataStore.logLevel,
+                DataStore.logMaxLine.getBlocking(),
+                logLevel ?: DataStore.logLevel.getBlocking(),
                 isOfficialProvider,
-                DataStore.isExpert,
+                DataStore.isExpert.getBlocking(),
             )
-            loadCA(DataStore.certProvider)
+            loadCA(DataStore.certProvider.getBlocking())
         } catch (e: LinkageError) {
             warnLibcoreLoadFailureAndExit(e)
         }

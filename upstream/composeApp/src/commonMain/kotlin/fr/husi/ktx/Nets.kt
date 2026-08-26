@@ -1,6 +1,7 @@
 package fr.husi.ktx
 
 import fr.husi.BuildConfig
+import fr.husi.DOMAIN_STRATEGY_AUTO
 import fr.husi.database.DataStore
 import fr.husi.fmt.AbstractBean
 import fr.husi.fmt.LOCALHOST4
@@ -9,8 +10,8 @@ import fr.husi.fmt.SingBoxOptions
 import fr.husi.libcore.Libcore
 import fr.husi.libcore.URL
 import java.net.Inet4Address
-import java.net.InetAddress
 import java.net.Inet6Address
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.InterfaceAddress
 import java.net.Socket
@@ -45,13 +46,13 @@ fun currentSocks5(): URL? = if (!DataStore.serviceState.connected) {
 } else {
     Libcore.newURL("socks5").apply {
         host = LOCALHOST4
-        ports = DataStore.mixedPort.toString()
+        ports = DataStore.mixedPort.getBlocking().toString()
 
         // Avoid creating User field if not have.
-        val username = DataStore.inboundUsername
+        val username = DataStore.inboundUsername.getBlocking()
         if (username.isNotEmpty()) {
             this.username = username
-            password = DataStore.inboundPassword
+            password = DataStore.inboundPassword.getBlocking()
         }
     }
 }
@@ -60,10 +61,14 @@ fun String.isIpAddress(): Boolean {
     return isIPv4() || isIPv6()
 }
 
-fun serverAddressDomainStrategy(): String? {
+suspend fun serverAddressDomainStrategy(): String? {
+    val domainStrategy = DataStore.domainStrategyForServer.get()
+        .replace(DOMAIN_STRATEGY_AUTO, "")
+        .blankAsNull()
+    val networkStrategy = DataStore.networkStrategy.get().blankAsNull()
     return defaultOr(
-        DataStore.domainStrategyForServer.replace("auto", "").blankAsNull(),
-        { DataStore.networkStrategy.blankAsNull() },
+        domainStrategy,
+        { networkStrategy },
     )
 }
 
@@ -141,16 +146,15 @@ fun mkPort(): Int {
     return port
 }
 
-val USER_AGENT by lazy { "husi/${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}; sing-box ${Libcore.versionBox()})" }
+val USER_AGENT by lazy { "husi/${BuildConfig.VERSION_NAME} (sing-box ${Libcore.versionBox()})" }
 
 /**
-Replace all version-about escapes in userAent
+ * Replace all version-about escapes in User-Agent
  */
 fun generateUserAgent(userAgent: String): String {
     if (userAgent.isBlank()) return USER_AGENT
-    return userAgent.replace("\$version_code", BuildConfig.VERSION_CODE.toString())
-        .replace("\$version", BuildConfig.VERSION_NAME)
-        .replace("\$box_version", Libcore.versionBox())
+    return userAgent.replace($$"$version", BuildConfig.VERSION_NAME)
+        .replace($$"$box_version", Libcore.versionBox())
 }
 
 fun InterfaceAddress.toPrefix(): String {

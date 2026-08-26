@@ -23,7 +23,6 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.SnackbarResult
-import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberBottomSheetState
@@ -46,6 +45,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.ernestoyaquello.dragdropswipelazycolumn.AllowedSwipeDirections
 import com.ernestoyaquello.dragdropswipelazycolumn.DragDropSwipeLazyColumn
 import com.ernestoyaquello.dragdropswipelazycolumn.DraggableSwipeableItem
 import com.ernestoyaquello.dragdropswipelazycolumn.DraggableSwipeableItemScope
@@ -61,14 +61,12 @@ import fr.husi.compose.TextButton
 import fr.husi.compose.fadingEdge
 import fr.husi.compose.material3.Icon
 import fr.husi.compose.material3.Text
-import fr.husi.compose.rememberSwipeToDismissBoxStateUnsaveable
 import fr.husi.compose.setPlainText
 import fr.husi.compose.withNavigation
 import fr.husi.database.SagerDatabase
 import fr.husi.fmt.toUniversalLink
 import fr.husi.ktx.blankAsNull
 import fr.husi.ktx.formatTime
-import fr.husi.ktx.onIoDispatcher
 import fr.husi.libcore.Libcore
 import fr.husi.repository.resolveRepository
 import fr.husi.resources.Res
@@ -118,8 +116,10 @@ import io.github.vinceglb.filekit.dialogs.FileKitDialogSettings
 import io.github.vinceglb.filekit.dialogs.compose.rememberFileSaverLauncher
 import io.github.vinceglb.filekit.write
 import kotlinx.collections.immutable.toImmutableList
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.format.char
@@ -256,7 +256,7 @@ fun GroupScreen(
                 contentPadding = contentPadding,
                 onIndicesChangedViaDragAndDrop = { viewModel.submitReorder(it) },
             ) { _, groupState ->
-                val swipeState = rememberSwipeToDismissBoxStateUnsaveable(groupState.group.id)
+                val removable = !groupState.group.ungrouped && !groupState.isUpdating
 
                 DraggableSwipeableItem(
                     modifier = Modifier.animateDraggableSwipeableItem(),
@@ -264,46 +264,34 @@ fun GroupScreen(
                         containerBackgroundColor = Color.Transparent,
                         containerBackgroundColorWhileDragged = Color.Transparent,
                     ),
+                    allowedSwipeDirections = if (removable) {
+                        AllowedSwipeDirections.All
+                    } else {
+                        AllowedSwipeDirections.None
+                    },
+                    onSwipeDismiss = { viewModel.undoableRemove(groupState.group.id) },
                 ) {
-                    SwipeToDismissBox(
-                        state = swipeState,
-                        enableDismissFromStartToEnd = !groupState.group.ungrouped && !groupState.isUpdating,
-                        enableDismissFromEndToStart = !groupState.group.ungrouped && !groupState.isUpdating,
-                        backgroundContent = {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(horizontal = 16.dp),
-                                contentAlignment = Alignment.CenterEnd,
-                            ) {
-                                Icon(vectorResource(Res.drawable.delete), null)
-                            }
+                    GroupCard(
+                        mainViewModel = mainViewModel,
+                        state = groupState,
+                        openGroupSettings = openGroupSettings,
+                        snackbar = { message ->
+                            snackbar.show(StringOrRes.Direct(message))
                         },
-                        modifier = Modifier.fillMaxWidth(),
-                        onDismiss = { viewModel.undoableRemove(groupState.group.id) },
-                    ) {
-                        GroupCard(
-                            mainViewModel = mainViewModel,
-                            state = groupState,
-                            openGroupSettings = openGroupSettings,
-                            snackbar = { message ->
-                                snackbar.show(StringOrRes.Direct(message))
-                            },
-                            showQRDialog = { url, name ->
-                                qrDialogData = url to name
-                            },
-                            showClearGroupDialog = {
-                                clearGroupConfirm = groupState.group.id
-                            },
-                            exportToFile = {
-                                groupToExport = groupState.group.id
-                                exportProfiles.launch(
-                                    suggestedName = "profiles_${groupState.group.displayName()}",
-                                    defaultExtension = "txt",
-                                )
-                            },
-                        )
-                    }
+                        showQRDialog = { url, name ->
+                            qrDialogData = url to name
+                        },
+                        showClearGroupDialog = {
+                            clearGroupConfirm = groupState.group.id
+                        },
+                        exportToFile = {
+                            groupToExport = groupState.group.id
+                            exportProfiles.launch(
+                                suggestedName = "profiles_${groupState.group.displayName()}",
+                                defaultExtension = "txt",
+                            )
+                        },
+                    )
                 }
             }
 
@@ -625,7 +613,7 @@ private fun DraggableSwipeableItemScope<GroupItemUiState>.GroupCard(
                                                 },
                                                 onClick = {
                                                     scope.launch {
-                                                        val links = onIoDispatcher {
+                                                        val links = withContext(Dispatchers.IO) {
                                                             SagerDatabase.proxyDao
                                                                 .getByGroup(group.id)
                                                                 .first()

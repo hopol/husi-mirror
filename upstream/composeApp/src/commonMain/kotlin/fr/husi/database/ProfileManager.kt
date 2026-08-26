@@ -11,18 +11,28 @@ import fr.husi.fmt.SingBoxOptions.NetworkICMP
 import fr.husi.fmt.SingBoxOptions.NetworkUDP
 import fr.husi.ktx.applyDefaultValues
 import fr.husi.repository.resolveRepository
+import fr.husi.resources.Res
+import fr.husi.resources.bypass_icmp
+import fr.husi.resources.hijack_dns
+import fr.husi.resources.route_bypass_domain
+import fr.husi.resources.route_bypass_ip
+import fr.husi.resources.route_opt_block_ads
+import fr.husi.resources.route_opt_block_quic
+import fr.husi.resources.route_opt_bypass_lan
+import fr.husi.resources.route_play_store
+import fr.husi.resources.sniff
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.IOException
-import java.util.Locale
-import kotlinx.coroutines.runBlocking
-import fr.husi.resources.*
+import java.util.*
 
 object ProfileManager {
 
-    private val defaultGroupLock = Any()
+    private val defaultGroupMutex = Mutex()
     private val repository get() = resolveRepository()
 
     suspend fun createProfile(groupId: Long, bean: AbstractBean): ProxyEntity {
@@ -51,8 +61,8 @@ object ProfileManager {
 
     suspend fun deleteProfile(groupId: Long, profileId: Long) {
         if (SagerDatabase.proxyDao.deleteById(profileId) == 0) return
-        if (DataStore.selectedProxy == profileId) {
-            DataStore.selectedProxy = 0L
+        if (DataStore.selectedProxy.get() == profileId) {
+            DataStore.selectedProxy.set(0L)
         }
         if (SagerDatabase.proxyDao.countByGroup(groupId).first() > 1) {
             GroupManager.rearrange(groupId)
@@ -62,27 +72,27 @@ object ProfileManager {
     suspend fun deleteProfiles(groupId: Long, profileIDs: List<Long>) {
         if (profileIDs.isEmpty()) return
         SagerDatabase.proxyDao.deleteProxies(profileIDs)
-        if (profileIDs.contains(DataStore.selectedProxy)) {
-            DataStore.selectedProxy = 0L
+        if (profileIDs.contains(DataStore.selectedProxy.get())) {
+            DataStore.selectedProxy.set(0L)
         }
         if (SagerDatabase.proxyDao.countByGroup(groupId).first() > 1) {
             GroupManager.rearrange(groupId)
         }
     }
 
-    fun getProfile(profileId: Long): ProxyEntity? {
+    suspend fun getProfile(profileId: Long): ProxyEntity? {
         if (profileId == 0L) return null
         return try {
-            runBlocking { SagerDatabase.proxyDao.getById(profileId) }
+            SagerDatabase.proxyDao.getById(profileId)
         } catch (e: SQLiteException) {
             throw IOException(e)
         }
     }
 
-    fun getProfiles(profileIds: List<Long>): List<ProxyEntity> {
+    suspend fun getProfiles(profileIds: List<Long>): List<ProxyEntity> {
         if (profileIds.isEmpty()) return listOf()
         return try {
-            runBlocking { SagerDatabase.proxyDao.getEntities(profileIds) }
+            SagerDatabase.proxyDao.getEntities(profileIds)
         } catch (e: SQLiteException) {
             throw IOException(e)
         }
@@ -122,8 +132,8 @@ object ProfileManager {
     fun getRules(): Flow<List<RuleEntity>> {
         return SagerDatabase.rulesDao.allRules().onStart {
             val currentRules = SagerDatabase.rulesDao.allRules().first()
-            if (currentRules.isEmpty() && !DataStore.rulesFirstCreate) {
-                DataStore.rulesFirstCreate = true
+            if (currentRules.isEmpty() && !DataStore.rulesFirstCreate.get()) {
+                DataStore.rulesFirstCreate.set(true)
                 createRule(
                     RuleEntity(
                         enabled = true,
@@ -233,12 +243,10 @@ object ProfileManager {
         }
     }
 
-    fun ensureDefaultGroupId(): Long = synchronized(defaultGroupLock) {
-        runBlocking {
-            SagerDatabase.groupDao.firstGroupId()
-                ?: SagerDatabase.groupDao.ungroupedId()
-                ?: SagerDatabase.groupDao.createGroup(ProxyGroup(ungrouped = true))
-        }
+    suspend fun ensureDefaultGroupId(): Long = defaultGroupMutex.withLock {
+        SagerDatabase.groupDao.firstGroupId()
+            ?: SagerDatabase.groupDao.ungroupedId()
+            ?: SagerDatabase.groupDao.createGroup(ProxyGroup(ungrouped = true))
     }
 
 }

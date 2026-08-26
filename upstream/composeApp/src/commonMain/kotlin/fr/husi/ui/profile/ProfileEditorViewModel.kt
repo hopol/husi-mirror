@@ -19,13 +19,13 @@ import fr.husi.database.SagerDatabase
 import fr.husi.fmt.AbstractBean
 import fr.husi.fmt.SingBoxOptions
 import fr.husi.ktx.applyDefaultValues
-import fr.husi.ktx.onIoDispatcher
 import fr.husi.ktx.runOnIoDispatcher
 import fr.husi.resources.Res
 import fr.husi.resources.mux_max_connections
 import fr.husi.resources.mux_max_streams
 import fr.husi.resources.mux_min_streams
 import fr.husi.ui.StringOrRes
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -35,6 +35,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.reflect.KClass
 
 @Immutable
@@ -92,7 +93,7 @@ internal abstract class ProfileEditorViewModel<T : AbstractBean> : ViewModel() {
             bean = if (isNew) {
                 createBean().applyDefaultValues()
             } else {
-                proxyEntity = onIoDispatcher { SagerDatabase.proxyDao.getById(editingId)!! }
+                proxyEntity = withContext(Dispatchers.IO) { SagerDatabase.proxyDao.getById(editingId)!! }
                 (proxyEntity.requireBean() as T)
             }
             bean.writeToUiState()
@@ -107,7 +108,7 @@ internal abstract class ProfileEditorViewModel<T : AbstractBean> : ViewModel() {
     fun save() = runOnIoDispatcher {
         if (isNew) {
             val editingGroup = DataStore.selectedGroupForImport()
-            DataStore.selectedGroup = editingGroup
+            DataStore.selectedGroup.set(editingGroup)
             val bean = createBean()
             bean.loadFromUiState()
             ProfileManager.createProfile(editingGroup, bean)
@@ -118,7 +119,7 @@ internal abstract class ProfileEditorViewModel<T : AbstractBean> : ViewModel() {
         ProfileManager.updateProfile(proxyEntity)
     }
 
-    suspend fun groupsForMove(): List<ProxyGroup> = onIoDispatcher {
+    suspend fun groupsForMove(): List<ProxyGroup> = withContext(Dispatchers.IO) {
         SagerDatabase.groupDao.allGroups()
             .first()
             .filter {
@@ -130,7 +131,7 @@ internal abstract class ProfileEditorViewModel<T : AbstractBean> : ViewModel() {
         val from = proxyEntity.groupId
         proxyEntity.groupId = to
         ProfileManager.updateProfile(proxyEntity)
-        DataStore.selectedGroup = to
+        DataStore.selectedGroup.set(to)
     }
 
     abstract fun setCustomConfig(config: String)

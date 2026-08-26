@@ -3,12 +3,12 @@ package fr.husi.ui.settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.text.AnnotatedString
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import fr.husi.Key
 import fr.husi.ProtocolProvider
 import fr.husi.compose.IconMaskColors
+import fr.husi.compose.collectAsStateWithLifecycle
+import fr.husi.compose.ListPreference
 import fr.husi.compose.MaskedIcon
-import fr.husi.compose.PreferenceDivider
+import fr.husi.compose.TextFieldPreference
 import fr.husi.compose.UIntegerTextField
 import fr.husi.compose.material3.Text
 import fr.husi.database.DataStore
@@ -24,22 +24,18 @@ import fr.husi.resources.plugin
 import fr.husi.resources.provider_naive
 import fr.husi.ui.StringOrRes
 import fr.husi.ui.stringOrRes
-import me.zhanghai.compose.preference.ListPreference
 import me.zhanghai.compose.preference.ListPreferenceType
-import me.zhanghai.compose.preference.TextFieldPreference
 import org.jetbrains.compose.resources.stringResource
 
 @Composable
 internal fun ProtocolSettingsGroup(
     needReload: () -> Unit,
 ) {
-    val uploadSpeedValue by DataStore.configurationStore
-        .intFlow(Key.UPLOAD_SPEED, 0)
-        .collectAsStateWithLifecycle(0)
+    val uploadSpeedValue by DataStore.uploadSpeed.collectAsStateWithLifecycle()
     TextFieldPreference(
         value = uploadSpeedValue,
         onValueChange = {
-            DataStore.uploadSpeed = it
+            DataStore.uploadSpeed.setBlocking(it)
             needReload()
         },
         title = { Text(stringResource(Res.string.hysteria_upload_mbps)) },
@@ -55,15 +51,12 @@ internal fun ProtocolSettingsGroup(
     ) { value, onValueChange, onOk ->
         UIntegerTextField(value, onValueChange, onOk)
     }
-    PreferenceDivider()
 
-    val downloadSpeedValue by DataStore.configurationStore
-        .intFlow(Key.DOWNLOAD_SPEED, 0)
-        .collectAsStateWithLifecycle(0)
+    val downloadSpeedValue by DataStore.downloadSpeed.collectAsStateWithLifecycle()
     TextFieldPreference(
         value = downloadSpeedValue,
         onValueChange = {
-            DataStore.downloadSpeed = it
+            DataStore.downloadSpeed.setBlocking(it)
             needReload()
         },
         title = { Text(stringResource(Res.string.hysteria_download_mbps)) },
@@ -76,7 +69,6 @@ internal fun ProtocolSettingsGroup(
     ) { value, onValueChange, onOk ->
         UIntegerTextField(value, onValueChange, onOk)
     }
-    PreferenceDivider()
 
     fun pluginProviderText(index: Int): StringOrRes = when (index) {
         ProtocolProvider.CORE -> StringOrRes.Direct("sing-box")
@@ -84,13 +76,11 @@ internal fun ProtocolSettingsGroup(
         else -> StringOrRes.Direct("sing-box")
     }
 
-    val hysteria2ProviderValue by DataStore.configurationStore
-        .intFlow(Key.PROVIDER_HYSTERIA2, ProtocolProvider.CORE)
-        .collectAsStateWithLifecycle(ProtocolProvider.CORE)
+    val hysteria2ProviderValue by DataStore.providerHysteria2.collectAsStateWithLifecycle()
     ListPreference(
         value = hysteria2ProviderValue,
         onValueChange = {
-            DataStore.providerHysteria2 = it
+            DataStore.providerHysteria2.setBlocking(it)
             needReload()
         },
         values = listOf(ProtocolProvider.CORE, ProtocolProvider.PLUGIN),
@@ -105,15 +95,12 @@ internal fun ProtocolSettingsGroup(
         type = ListPreferenceType.DROPDOWN_MENU,
         valueToText = { AnnotatedString(stringOrRes(pluginProviderText(it))) },
     )
-    PreferenceDivider()
 
-    val juicityProviderValue by DataStore.configurationStore
-        .intFlow(Key.PROVIDER_JUICITY, ProtocolProvider.PLUGIN)
-        .collectAsStateWithLifecycle(ProtocolProvider.PLUGIN)
+    val juicityProviderValue by DataStore.providerJuicity.collectAsStateWithLifecycle()
     ListPreference(
         value = juicityProviderValue,
         onValueChange = {
-            DataStore.providerJuicity = it
+            DataStore.providerJuicity.setBlocking(it)
             needReload()
         },
         values = listOf(ProtocolProvider.CORE, ProtocolProvider.PLUGIN),
@@ -128,15 +115,12 @@ internal fun ProtocolSettingsGroup(
         type = ListPreferenceType.DROPDOWN_MENU,
         valueToText = { AnnotatedString(stringOrRes(pluginProviderText(it))) },
     )
-    PreferenceDivider()
 
-    val naiveProviderValue by DataStore.configurationStore
-        .intFlow(Key.PROVIDER_NAIVE, ProtocolProvider.CORE)
-        .collectAsStateWithLifecycle(ProtocolProvider.CORE)
+    val naiveProviderValue by DataStore.providerNaive.collectAsStateWithLifecycle()
     ListPreference(
         value = naiveProviderValue,
         onValueChange = {
-            DataStore.providerNaive = it
+            DataStore.providerNaive.setBlocking(it)
             needReload()
         },
         values = listOf(ProtocolProvider.CORE, ProtocolProvider.PLUGIN),

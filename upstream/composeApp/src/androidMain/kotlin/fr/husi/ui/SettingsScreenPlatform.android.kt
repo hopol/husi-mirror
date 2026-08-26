@@ -15,15 +15,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.os.LocaleListCompat
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import fr.husi.DEFAULT_HTTP_BYPASS
-import fr.husi.Key
 import fr.husi.LauncherIcon
 import fr.husi.compose.HostTextField
+import fr.husi.compose.collectAsStateWithLifecycle
 import fr.husi.compose.IconMaskColors
 import fr.husi.compose.MaskedIcon
-import fr.husi.compose.PreferenceDivider
+import fr.husi.compose.SwitchPreference
 import fr.husi.compose.TextButton
+import fr.husi.compose.TextFieldPreference
+import fr.husi.compose.TwoTargetSwitchPreference
 import fr.husi.compose.ValidatedTextField
 import fr.husi.compose.material3.Text
 import fr.husi.database.DataStore
@@ -66,19 +66,14 @@ import fr.husi.resources.visibility_off
 import fr.husi.resources.vpn_session_name
 import fr.husi.resources.vpn_session_name_summary
 import kotlinx.coroutines.flow.flowOf
-import me.zhanghai.compose.preference.SwitchPreference
-import me.zhanghai.compose.preference.TextFieldPreference
-import me.zhanghai.compose.preference.TwoTargetSwitchPreference
 import org.jetbrains.compose.resources.stringResource
 
 @Composable
 internal actual fun AutoConnectPreference() {
-    val value by DataStore.configurationStore
-        .booleanFlow(Key.PERSIST_ACROSS_REBOOT, false)
-        .collectAsStateWithLifecycle(false)
+    val value by DataStore.persistAcrossReboot.collectAsStateWithLifecycle()
     SwitchPreference(
         value = value,
-        onValueChange = { DataStore.persistAcrossReboot = it },
+        onValueChange = { DataStore.persistAcrossReboot.setBlocking(it) },
         title = { Text(stringResource(Res.string.auto_connect)) },
         icon = {
             MaskedIcon(
@@ -114,14 +109,11 @@ internal actual fun rememberApplyNightMode(): (Int) -> Unit {
 
 @Composable
 internal actual fun PlatformGeneralOptions(needReload: () -> Unit) {
-    PreferenceDivider()
-    val value by DataStore.configurationStore
-        .stringFlow(Key.VPN_SESSION_NAME, "")
-        .collectAsStateWithLifecycle("")
+    val value by DataStore.vpnSessionName.collectAsStateWithLifecycle()
     TextFieldPreference(
         value = value,
         onValueChange = {
-            DataStore.vpnSessionName = it
+            DataStore.vpnSessionName.setBlocking(it)
             needReload()
         },
         title = { Text(stringResource(Res.string.vpn_session_name)) },
@@ -149,13 +141,11 @@ internal actual fun PlatformGeneralOptions(needReload: () -> Unit) {
         )
     }
 
-    val bypassValue by DataStore.configurationStore
-        .booleanFlow(Key.ALLOW_APPS_BYPASS_VPN, false)
-        .collectAsStateWithLifecycle(false)
+    val bypassValue by DataStore.allowAppsBypassVpn.collectAsStateWithLifecycle()
     SwitchPreference(
         value = bypassValue,
         onValueChange = {
-            DataStore.allowAppsBypassVpn = it
+            DataStore.allowAppsBypassVpn.setBlocking(it)
             needReload()
         },
         title = { Text(stringResource(Res.string.allow_apps_bypass_vpn)) },
@@ -164,13 +154,11 @@ internal actual fun PlatformGeneralOptions(needReload: () -> Unit) {
         },
     )
 
-    val showGroupValue by DataStore.configurationStore
-        .booleanFlow(Key.SHOW_GROUP_IN_NOTIFICATION, false)
-        .collectAsStateWithLifecycle(false)
+    val showGroupValue by DataStore.showGroupInNotification.collectAsStateWithLifecycle()
     SwitchPreference(
         value = showGroupValue,
         onValueChange = {
-            DataStore.showGroupInNotification = it
+            DataStore.showGroupInNotification.setBlocking(it)
             needReload()
         },
         title = { Text(stringResource(Res.string.show_group_in_notification)) },
@@ -182,13 +170,11 @@ internal actual fun PlatformGeneralOptions(needReload: () -> Unit) {
 
 @Composable
 internal actual fun PlatformRouteOptions(needReload: () -> Unit, isVpnMode: Boolean) {
-    val value by DataStore.configurationStore
-        .booleanFlow(Key.BYPASS_LAN, true)
-        .collectAsStateWithLifecycle(true)
+    val value by DataStore.bypassLan.collectAsStateWithLifecycle()
     SwitchPreference(
         value = value,
         onValueChange = {
-            DataStore.bypassLan = it
+            DataStore.bypassLan.setBlocking(it)
             needReload()
         },
         title = { Text(stringResource(Res.string.route_opt_bypass_lan)) },
@@ -203,13 +189,11 @@ internal actual fun PlatformRouteOptions(needReload: () -> Unit, isVpnMode: Bool
 
 @Composable
 internal actual fun ProxyAppsPreferences(openAppManager: () -> Unit) {
-    val value by DataStore.configurationStore
-        .booleanFlow(Key.PROXY_APPS, false)
-        .collectAsStateWithLifecycle(false)
+    val value by DataStore.proxyApps.collectAsStateWithLifecycle()
     TwoTargetSwitchPreference(
         value = value,
         onValueChange = {
-            DataStore.proxyApps = it
+            DataStore.proxyApps.setBlocking(it)
             if (it) {
                 openAppManager()
             }
@@ -221,18 +205,15 @@ internal actual fun ProxyAppsPreferences(openAppManager: () -> Unit) {
         summary = { Text(stringResource(Res.string.proxied_apps_summary)) },
         onClick = {
             if (!value) {
-                DataStore.proxyApps = true
+                DataStore.proxyApps.setBlocking(true)
             }
             openAppManager()
         },
     )
-    val updateValue by DataStore.configurationStore
-        .booleanFlow(Key.UPDATE_PROXY_APPS_WHEN_INSTALL, false)
-        .collectAsStateWithLifecycle(false)
-    PreferenceDivider()
+    val updateValue by DataStore.updateProxyAppsWhenInstall.collectAsStateWithLifecycle()
     SwitchPreference(
         value = updateValue,
-        onValueChange = { DataStore.updateProxyAppsWhenInstall = it },
+        onValueChange = { DataStore.updateProxyAppsWhenInstall.setBlocking(it) },
         title = { Text(stringResource(Res.string.update_proxy_apps_when_install)) },
         icon = {
             MaskedIcon(
@@ -241,18 +222,14 @@ internal actual fun ProxyAppsPreferences(openAppManager: () -> Unit) {
             )
         },
     )
-    PreferenceDivider()
 }
 
 @Composable
 internal actual fun PlatformSecurityOptions() {
-    PreferenceDivider()
-    val value by DataStore.configurationStore
-        .booleanFlow(Key.PRIVACY_MODE, false)
-        .collectAsStateWithLifecycle(false)
+    val value by DataStore.privacyMode.collectAsStateWithLifecycle()
     SwitchPreference(
         value = value,
-        onValueChange = { DataStore.privacyMode = it },
+        onValueChange = { DataStore.privacyMode.setBlocking(it) },
         title = { Text(stringResource(Res.string.privacy_mode)) },
         icon = {
             MaskedIcon(Res.drawable.privacy, color = IconMaskColors.IconCoral)
@@ -263,14 +240,11 @@ internal actual fun PlatformSecurityOptions() {
 
 @Composable
 internal actual fun MeteredNetworkPreference(needReload: () -> Unit) {
-    PreferenceDivider()
-    val value by DataStore.configurationStore
-        .booleanFlow(Key.METERED_NETWORK, false)
-        .collectAsStateWithLifecycle(false)
+    val value by DataStore.meteredNetwork.collectAsStateWithLifecycle()
     SwitchPreference(
         value = value,
         onValueChange = {
-            DataStore.meteredNetwork = it
+            DataStore.meteredNetwork.setBlocking(it)
             needReload()
         },
         title = { Text(stringResource(Res.string.metered)) },
@@ -286,13 +260,11 @@ internal actual fun MeteredNetworkPreference(needReload: () -> Unit) {
 
 @Composable
 internal actual fun HttpProxyBypassPreference(enabled: Boolean, needReload: () -> Unit) {
-    val value by DataStore.configurationStore
-        .stringFlow(Key.HTTP_PROXY_BYPASS, DEFAULT_HTTP_BYPASS)
-        .collectAsStateWithLifecycle(DEFAULT_HTTP_BYPASS)
+    val value by DataStore.httpProxyBypass.collectAsStateWithLifecycle()
     TextFieldPreference(
         value = value,
         onValueChange = {
-            DataStore.httpProxyBypass = it
+            DataStore.httpProxyBypass.setBlocking(it)
             needReload()
         },
         title = { Text(stringResource(Res.string.http_proxy_bypass)) },
@@ -309,14 +281,11 @@ internal actual fun HttpProxyBypassPreference(enabled: Boolean, needReload: () -
 
 @Composable
 internal actual fun PlatformMiscOptions(needReload: () -> Unit) {
-    PreferenceDivider()
-    val value by DataStore.configurationStore
-        .booleanFlow(Key.ACQUIRE_WAKE_LOCK, true)
-        .collectAsStateWithLifecycle(true)
+    val value by DataStore.acquireWakeLock.collectAsStateWithLifecycle()
     SwitchPreference(
         value = value,
         onValueChange = {
-            DataStore.acquireWakeLock = it
+            DataStore.acquireWakeLock.setBlocking(it)
             needReload()
         },
         title = { Text(stringResource(Res.string.acquire_wake_lock)) },
@@ -363,14 +332,12 @@ internal actual fun rememberAppLanguageController(defaultTag: String): AppLangua
 
 @Composable
 internal actual fun DisableProcessTextPreference() {
-    val value by DataStore.configurationStore
-        .booleanFlow(Key.DISABLE_PROCESS_TEXT, false)
-        .collectAsStateWithLifecycle(false)
+    val value by DataStore.disableProcessText.collectAsStateWithLifecycle()
     val context = LocalContext.current
     SwitchPreference(
         value = value,
         onValueChange = {
-            DataStore.disableProcessText = it
+            DataStore.disableProcessText.setBlocking(it)
             context.packageManager.setComponentEnabledSetting(
                 ComponentName(
                     context,
@@ -396,17 +363,14 @@ internal actual fun DisableProcessTextPreference() {
 
 @Composable
 internal actual fun HideLauncherIconPreference() {
-    val value by DataStore.configurationStore
-        .booleanFlow(Key.HIDE_LAUNCHER_ICON, false)
-        .collectAsStateWithLifecycle(false)
+    val value by DataStore.hideLauncherIcon.collectAsStateWithLifecycle()
     var showConfirm by rememberSaveable { mutableStateOf(false) }
 
     fun setHidden(hidden: Boolean) {
-        DataStore.hideLauncherIcon = hidden
+        DataStore.hideLauncherIcon.setBlocking(hidden)
         LauncherIcon.hidden = hidden
     }
 
-    PreferenceDivider()
     SwitchPreference(
         value = value,
         onValueChange = { hide ->

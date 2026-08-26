@@ -39,11 +39,13 @@ import fr.husi.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import fr.husi.compose.CapsuleActionButton
 import fr.husi.compose.CapsuleTopBar
+import fr.husi.compose.ListPreference
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -81,7 +83,6 @@ import fr.husi.resources.unsaved_changes_prompt
 import fr.husi.ui.ComposeActivity
 import fr.husi.ui.configuration.ProfileSelectSheet
 import kotlinx.coroutines.runBlocking
-import me.zhanghai.compose.preference.ListPreference
 import me.zhanghai.compose.preference.ListPreferenceType
 import me.zhanghai.compose.preference.ProvidePreferenceLocals
 import org.jetbrains.compose.resources.stringResource
@@ -216,26 +217,28 @@ class TaskerActivity : ComposeActivity() {
         val profileId = uiState.profileID
         settings.action = action
         settings.profileId = profileId
-        var blurb = ""
-        when (action) {
-            TaskerBundle.ACTION_START -> {
-                if (profileId > 0) {
-                    val entity = ProfileManager.getProfile(profileId)
+        val blurb = runBlocking {
+            when (action) {
+                TaskerBundle.ACTION_START -> {
+                    val entity = if (profileId > 0) {
+                        ProfileManager.getProfile(profileId)
+                    } else {
+                        null
+                    }
                     if (entity != null) {
-                        blurb = runBlocking {
-                            resolveRepository().getString(
-                                Res.string.tasker_blurb_start_profile, entity.displayName(),
-                            )
-                        }
+                        resolveRepository().getString(
+                            Res.string.tasker_blurb_start_profile, entity.displayName(),
+                        )
+                    } else {
+                        resolveRepository().getString(Res.string.tasker_action_start_service)
                     }
                 }
-                if (blurb.isBlank()) runBlocking {
-                    blurb = resolveRepository().getString(Res.string.tasker_action_start_service)
-                }
-            }
 
-            TaskerBundle.ACTION_STOP -> runBlocking {
-                blurb = resolveRepository().getString(Res.string.tasker_action_stop_service)
+                TaskerBundle.ACTION_STOP -> {
+                    resolveRepository().getString(Res.string.tasker_action_stop_service)
+                }
+
+                else -> ""
             }
         }
         return Intent().apply {
@@ -286,8 +289,11 @@ class TaskerActivity : ComposeActivity() {
                 enabled = uiState.action == TaskerBundle.ACTION_START,
                 icon = { Icon(vectorResource(Res.drawable.router), null) },
                 summary = {
-                    val summary = ProfileManager.getProfile(uiState.profileID)?.displayName()
-                        ?: stringResource(Res.string.not_set)
+                    val notSet = stringResource(Res.string.not_set)
+                    val summary by produceState(notSet, uiState.profileID) {
+                        value = ProfileManager.getProfile(uiState.profileID)?.displayName()
+                            ?: notSet
+                    }
                     Text(summary)
                 },
                 type = ListPreferenceType.DROPDOWN_MENU,

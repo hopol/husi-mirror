@@ -100,7 +100,7 @@ jobs:
         run: make proto
       - name: Check the generated tree is up to date
         run: git diff --exit-code && test -z "$(git status --porcelain)"
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
@@ -121,6 +121,17 @@ jobs:
       - name: Test Zig projects
         run: make test_zig
       - name: Test Kotlin
+        id: kotlin-tests
         env:
           BUILD_PLUGIN: none
         run: ./gradlew :composeApp:allTests --build-cache
+      - name: Upload Kotlin test report
+        if: failure() && steps.kotlin-tests.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: kotlin-test-report
+          path: |
+            build/reports/problems/
+            composeApp/build/reports/tests/
+            composeApp/build/test-results/
+          if-no-files-found: warn

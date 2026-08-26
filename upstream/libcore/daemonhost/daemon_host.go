@@ -48,6 +48,10 @@ func DefaultSocketPath() string {
 }
 
 func (h *DaemonHost) Run(ctx context.Context) error {
+	return runDaemonHost(ctx, h)
+}
+
+func (h *DaemonHost) run(ctx context.Context) error {
 	if ctx == nil {
 		return E.New("missing context")
 	}
@@ -77,6 +81,12 @@ func (h *DaemonHost) Run(ctx context.Context) error {
 
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	stuck := newStuckHostSignal(
+		cancel,
+		"core host is unusable, restarting the daemon",
+		"exiting so a working daemon can take over",
+	)
 
 	hostCtx := daemonBaseContext(runCtx)
 	holder := coresvc.NewInstanceContextHolder()
@@ -124,6 +134,7 @@ func (h *DaemonHost) Run(ctx context.Context) error {
 		ServerOptions: serverOptions,
 		// Skip default locale chain; we already installed locale+auth above.
 		SkipDefaultInterceptors: true,
+		OnStuck:                 stuck.report,
 		Backend: &pooledBackend{
 			workingDir: absDir,
 			// Same owner credential drop as StartService: plugins never run as
@@ -163,7 +174,7 @@ func (h *DaemonHost) Run(ctx context.Context) error {
 	_ = daemonSvc.stopLocked(false)
 	daemonSvc.access.Unlock()
 
-	return host.Close()
+	return stuck.exitError(host.Close())
 }
 
 func verifyOwnCorePairSignature() error {

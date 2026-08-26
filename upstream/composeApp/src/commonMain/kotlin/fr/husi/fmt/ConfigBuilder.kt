@@ -1,5 +1,6 @@
 package fr.husi.fmt
 
+import fr.husi.DOMAIN_STRATEGY_AUTO
 import fr.husi.Key
 import fr.husi.NetworkInterfaceStrategy
 import fr.husi.RuleProvider
@@ -43,8 +44,8 @@ import fr.husi.fmt.hysteria.HysteriaBean
 import fr.husi.fmt.hysteria.buildSingBoxOutboundHysteriaBean
 import fr.husi.fmt.internal.ChainBean
 import fr.husi.fmt.internal.ProxySetBean
-import fr.husi.fmt.internal.resolveMembers
 import fr.husi.fmt.internal.buildSingBoxOutboundProxySetBean
+import fr.husi.fmt.internal.resolveMembers
 import fr.husi.fmt.juicity.JuicityBean
 import fr.husi.fmt.juicity.buildSingBoxOutboundJuicityBean
 import fr.husi.fmt.mieru.MieruBean
@@ -92,7 +93,6 @@ import fr.husi.logLevelString
 import fr.husi.platform.PlatformInfo
 import fr.husi.repository.resolveRepository
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonPrimitive
 
 // Inbound
@@ -145,7 +145,7 @@ data class TrafficNode(
     val memberTags: List<String> = emptyList(),
 )
 
-fun buildConfig(
+suspend fun buildConfig(
     proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean = false,
 ): ConfigBuildResult {
     val repository = resolveRepository()
@@ -286,7 +286,7 @@ fun buildConfig(
         }
     }
 
-    fun ProxyEntity.resolveChainInternal(referencePath: List<Long> = emptyList()): ResolvedChain {
+    suspend fun ProxyEntity.resolveChain(referencePath: List<Long> = emptyList()): ResolvedChain {
         if (!resolvingReferences.add(id)) {
             val cycle = (resolvingReferences.dropWhile { it != id } + id).joinToString(" -> ")
             error("Circular proxy reference: $cycle")
@@ -297,9 +297,7 @@ fun buildConfig(
                 is ChainBean -> {
                     bean.proxies.requireNoDuplicateReferences("chain $id")
                     val requestedProxyIds = bean.proxies.asReversed()
-                    val beans = runBlocking {
-                        SagerDatabase.proxyDao.getEntities(requestedProxyIds)
-                    }
+                    val beans = SagerDatabase.proxyDao.getEntities(requestedProxyIds)
                     val beansMap = beans.associateBy { it.id }
                     val missingProxyIds = requestedProxyIds.filterNot(beansMap::containsKey)
                     if (missingProxyIds.isNotEmpty()) {
@@ -310,7 +308,7 @@ fun buildConfig(
                     }
                     val resolved = mergeResolvedChains(
                         requestedProxyIds.map { proxyId ->
-                            beansMap.getValue(proxyId).resolveChainInternal(referencePath + id)
+                            beansMap.getValue(proxyId).resolveChain(referencePath + id)
                         },
                         connect = true,
                     )
@@ -323,14 +321,12 @@ fun buildConfig(
                 }
 
                 is ProxySetBean -> {
-                    val memberProfiles = runBlocking {
-                        bean.resolveMembers(id, failOnMissing = true)
-                    }
+                    val memberProfiles = bean.resolveMembers(id, failOnMissing = true)
 
                     val memberChains = mutableListOf<ResolvedChain>()
                     for (member in memberProfiles) {
                         memberChains.add(
-                            member.resolveChainInternal(referencePath + id),
+                            member.resolveChain(referencePath + id),
                         )
                     }
 
@@ -367,47 +363,16 @@ fun buildConfig(
         }
     }
 
-    fun ProxyEntity.resolveChain(): ResolvedChain {
-        val thisGroup = runBlocking { SagerDatabase.groupDao.getById(groupId).first() }
-        val frontProxy =
-            thisGroup?.frontProxy?.let { runBlocking { SagerDatabase.proxyDao.getById(it) } }
-        val landingProxy =
-            thisGroup?.landingProxy?.let { runBlocking { SagerDatabase.proxyDao.getById(it) } }
-
-        // Group wrappers are resolved in separate calls from the main profile. Keep the
-        // occurrence isolation used by nested proxy sets, but reject a wrapper that expands an
-        // entity already present in the main subtree. Otherwise the same outbound can be emitted
-        // twice with different reference paths and bypass mergeResolvedChains' duplicate check.
-        val mainChain = resolveChainInternal()
-        val mainEntityIds = mainChain.entries.asSequence().mapTo(HashSet()) { it.entity.id }
-
-        fun resolveWrapper(wrapper: ProxyEntity?): ResolvedChain? {
-            val resolved = wrapper?.resolveChainInternal() ?: return null
-            val duplicate = resolved.entries.firstOrNull { it.entity.id in mainEntityIds }
-            if (duplicate != null) {
-                error("Duplicate proxy reference: ${duplicate.key.describe()}")
-            }
-            return resolved
-        }
-
-        return mergeResolvedChains(
-            listOfNotNull(
-                resolveWrapper(landingProxy),
-                mainChain,
-                resolveWrapper(frontProxy),
-            ),
-            connect = true,
-        )
-    }
-
-    val logLevel = DataStore.logLevel
+    val logLevel = DataStore.logLevel.get()
     val extraRules = if (forTest) {
         emptyList()
-    } else runBlocking {
+    } else {
         ProfileManager.enabledRules().first()
     }
     val extraProxies =
-        if (forTest) mapOf() else runBlocking {
+        if (forTest) {
+            mapOf()
+        } else {
             SagerDatabase.proxyDao.getEntities(
                 extraRules.mapNotNull { rule ->
                     rule.outbound.takeIf { it > 0 && it != proxy.id }
@@ -417,42 +382,55 @@ fun buildConfig(
     val userDNSRuleList = mutableListOf<JSONMap>()
     val domainListDNSDirectForce = mutableSetOf<String>()
     val bypassDNSBeans = hashSetOf<AbstractBean>()
-    val isVPN = DataStore.serviceMode == Key.MODE_VPN
-    val bind = if (!forTest && DataStore.allowAccess) "0.0.0.0" else LOCALHOST4
-    val remoteDns = DataStore.remoteDns.split("\n")
-        .mapNotNull { dns -> dns.trim().takeIf { it.isNotBlank() && !it.startsWith("#") } }
-    val directDNS = DataStore.directDns.split("\n")
-        .mapNotNull { dns -> dns.trim().takeIf { it.isNotBlank() && !it.startsWith("#") } }
-    val mDNSInterfaces by lazy {
-        DataStore.mDNS.blankAsNull()?.listByLineOrComma()?.takeIf { it.isNotEmpty() }
+    val isVPN = DataStore.serviceMode.get() == Key.MODE_VPN
+    val allowAccess = DataStore.allowAccess.get()
+    val bind = if (!forTest && allowAccess) {
+        "0.0.0.0"
+    } else {
+        LOCALHOST4
     }
-    val localDNSPort = DataStore.localDNSPort.takeIf { it > 0 }
-    val useFakeDns by lazy { !forTest && DataStore.enableFakeDns }
-    val fakeDNSForAll by lazy { useFakeDns && DataStore.fakeDNSForAll }
-    val dnsHosts by lazy {
-        DataStore.dnsHosts.blankAsNull()?.lineSequence()
-            ?.mapNotNullTo(mutableListOf()) { line ->
-                val trimmed = line.trim()
-                // Promote the compatibility.
-                if (trimmed.isEmpty() || trimmed.startsWith("#")) return@mapNotNullTo null
-                val tokens = trimmed.split("\\s+".toRegex()) // Handle direct copy from host file.
-                if (tokens.size < 2) return@mapNotNullTo null
-                val host = tokens[0]
-                val ips = tokens.drop(1).toMutableList()
-                host to ips
-            }
-            ?.toMap()
-            ?.takeIf { it.isNotEmpty() }
-    }
+    val remoteDns = DataStore.remoteDns.get()
+        .split("\n")
+        .mapNotNull { dns ->
+            dns.trim().takeIf { it.isNotBlank() && !it.startsWith("#") }
+        }
+    val directDNS = DataStore.directDns.get()
+        .split("\n")
+        .mapNotNull { dns ->
+            dns.trim().takeIf { it.isNotBlank() && !it.startsWith("#") }
+        }
+    val mDNSInterfaces = DataStore.mDNS.get()
+        .blankAsNull()
+        ?.listByLineOrComma()
+        ?.takeIf { it.isNotEmpty() }
+    val localDNSPort = DataStore.localDNSPort.get().takeIf { it > 0 }
+    val useFakeDns = !forTest && DataStore.enableFakeDns.get()
+    val fakeDNSForAll = useFakeDns && DataStore.fakeDNSForAll.get()
+    val dnsHosts = DataStore.dnsHosts.get()
+        .blankAsNull()
+        ?.lineSequence()
+        ?.mapNotNullTo(mutableListOf()) { line ->
+            val trimmed = line.trim()
+            // Promote the compatibility.
+            if (trimmed.isEmpty() || trimmed.startsWith("#")) return@mapNotNullTo null
+            val tokens = trimmed.split("\\s+".toRegex()) // Handle direct copy from host file.
+            if (tokens.size < 2) return@mapNotNullTo null
+            val host = tokens[0]
+            val ips = tokens.drop(1).toMutableList()
+            host to ips
+        }
+        ?.toMap()
+        ?.takeIf { it.isNotEmpty() }
     val externalIndexMap = ArrayList<IndexEntity>()
-    val networkStrategy = DataStore.networkStrategy
-    val networkInterfaceStrategy = DataStore.networkInterfaceType
-    val networkPreferredInterfaces = DataStore.networkPreferredInterfaces.toList()
-    val defaultStrategy = DataStore.networkStrategy.blankAsNull()
+    val networkStrategy = DataStore.networkStrategy.get()
+    val networkInterfaceStrategy = DataStore.networkInterfaceType.get()
+    val networkPreferredInterfaces = DataStore.networkPreferredInterfaces.get().toList()
+    val defaultStrategy = networkStrategy.blankAsNull()
     val serverDomainStrategy = serverAddressDomainStrategy()
-    val disableTcpKeepAlive = DataStore.disableTcpKeepAlive
-    val tcpKeepAliveIdle = DataStore.tcpKeepAliveIdle.blankAsNull()
-    val tcpKeepAliveInterval = DataStore.tcpKeepAliveInterval.blankAsNull()
+    val disableTcpKeepAlive = DataStore.disableTcpKeepAlive.get()
+    val tcpKeepAliveIdle = DataStore.tcpKeepAliveIdle.get().blankAsNull()
+    val tcpKeepAliveInterval = DataStore.tcpKeepAliveInterval.get().blankAsNull()
+    val mixedPort = DataStore.mixedPort.get()
     lateinit var mainTag: String
 
     val readableNames = mutableSetOf(TAG_DIRECT, TAG_BLOCK)
@@ -466,9 +444,11 @@ fun buildConfig(
         `$schema` = CONFIG_SCHEMA_URL
         if (!forTest) experimental = ExperimentalOptions().apply {
             if (!forExport) {
-                if (DataStore.isExpert) DataStore.debugListen.blankAsNull()?.let {
-                    debug = SingBoxOptions.DebugOptions().apply {
-                        listen = it
+                if (DataStore.isExpert.get()) {
+                    DataStore.debugListen.get().blankAsNull()?.let {
+                        debug = SingBoxOptions.DebugOptions().apply {
+                            listen = it
+                        }
                     }
                 }
             }
@@ -483,11 +463,11 @@ fun buildConfig(
             level = logLevelString(logLevel)
         }
 
-        if (DataStore.ntpEnable) ntp = NTPOptions().apply {
+        if (DataStore.ntpEnable.get()) ntp = NTPOptions().apply {
             enabled = true
-            server = DataStore.ntpAddress
-            server_port = DataStore.ntpPort
-            interval = DataStore.ntpInterval
+            server = DataStore.ntpAddress.get()
+            server_port = DataStore.ntpPort.get()
+            interval = DataStore.ntpInterval.get()
 
             if (!server!!.isIpAddress()) {
                 domainListDNSDirectForce.add(server!!)
@@ -498,7 +478,7 @@ fun buildConfig(
             servers = mutableListOf()
             rules = mutableListOf()
             if (!forTest) {
-                DataStore.dnsOptimisticCache.blankAsNull()?.let { it ->
+                DataStore.dnsOptimisticCache.get().blankAsNull()?.let { it ->
                     optimistic = OptimisticDNSOptions().apply {
                         enabled = true
                         timeout = it
@@ -522,8 +502,8 @@ fun buildConfig(
                 )
             }
 
-            if (DataStore.allowAccess) {
-                DataStore.anchorSSID.blankAsNull()?.let { allowedSSIDs ->
+            if (allowAccess) {
+                DataStore.anchorSSID.get().blankAsNull()?.let { allowedSSIDs ->
                     platformServices.add(
                         SingBoxOptions.Service_AnchorOptions().apply {
                             type = SingBoxOptions.TYPE_ANCHOR
@@ -532,7 +512,7 @@ fun buildConfig(
                             listen_port = ANCHOR_PORT
                             dns_port = localDNSPort ?: 0
                             device_name = anchorDeviceName
-                            socks_port = DataStore.mixedPort
+                            socks_port = mixedPort
                             allowed_ssids = allowedSSIDs.lines().toMutableList()
                         },
                     )
@@ -547,12 +527,12 @@ fun buildConfig(
                 Inbound_TunOptions().apply {
                     type = SingBoxOptions.TYPE_TUN
                     tag = TAG_TUN
-                    stack = when (DataStore.tunImplementation) {
+                    stack = when (DataStore.tunImplementation.get()) {
                         TunImplementation.GVISOR -> "gvisor"
                         TunImplementation.SYSTEM -> "system"
                         else -> "mixed"
                     }
-                    mtu = DataStore.mtu
+                    mtu = DataStore.mtu.get()
                     // Hijack intercepts port 53 at the TUN layer and calls
                     // router.HijackDNSPacket (with searchProcessInfo) directly,
                     // bypassing route rule matching.
@@ -582,17 +562,19 @@ fun buildConfig(
                     type = SingBoxOptions.TYPE_MIXED
                     tag = TAG_MIXED
                     listen = bind
-                    listen_port = DataStore.mixedPort
+                    listen_port = mixedPort
                     if (!PlatformInfo.isAndroid) {
-                        if (DataStore.appendHttpProxy) {
+                        if (DataStore.appendHttpProxy.get()) {
                             set_system_proxy = true
                         }
                     }
-                    if (DataStore.inboundUsername.isNotBlank() || DataStore.inboundPassword.isNotBlank()) {
+                    val inboundUsername = DataStore.inboundUsername.get()
+                    val inboundPassword = DataStore.inboundPassword.get()
+                    if (inboundUsername.isNotBlank() || inboundPassword.isNotBlank()) {
                         users = mutableListOf(
                             User().apply {
-                                username = DataStore.inboundUsername
-                                password = DataStore.inboundPassword
+                                username = inboundUsername
+                                password = inboundPassword
                             },
                         )
                     }
@@ -610,14 +592,14 @@ fun buildConfig(
             // Android always searches processes through the platform interface,
             // so this option only means something on desktop.
             // https://github.com/SagerNet/sing-box/commit/4b1b00a4f6729a027a653f417cda0701c6a32934
-            if (!PlatformInfo.isAndroid && !forTest && DataStore.forcedSearchProcess) {
+            if (!PlatformInfo.isAndroid && !forTest && DataStore.forcedSearchProcess.get()) {
                 find_process = true
             }
         }
 
         // returns outbound tag
         // chainId == 0L => main proxy
-        fun buildChain(chainId: Long, entity: ProxyEntity): String {
+        suspend fun buildChain(chainId: Long, entity: ProxyEntity): String {
             // Builders update finalAddress/finalPort for external plugins. Keep those
             // mutations local to this occurrence even when the same profile is expanded
             // more than once or also built for a routing rule.
@@ -662,7 +644,7 @@ fun buildConfig(
                 remove("domain_resolver")
             }
 
-            fun connectChainNode(previousEntry: ChainEntry, currentTag: String) {
+            suspend fun connectChainNode(previousEntry: ChainEntry, currentTag: String) {
                 val previousEntity = previousEntry.entity
                 if (previousEntity.needExternal()) {
                     route!!.rules!!.add(
@@ -1300,7 +1282,9 @@ fun buildConfig(
                         TAG_DNS_DIRECT
                     }
                     strategy = defaultOr(
-                        DataStore.domainStrategyForDirect.replace("auto", "").blankAsNull(),
+                        DataStore.domainStrategyForDirect.get()
+                            .replace(DOMAIN_STRATEGY_AUTO, "")
+                            .blankAsNull(),
                         { defaultStrategy },
                     )
                 }
@@ -1468,12 +1452,12 @@ fun buildConfig(
                 val fakeRange4 = if (networkStrategy == SingBoxOptions.STRATEGY_IPV6_ONLY) {
                     null
                 } else {
-                    DataStore.fakeDNSRange4.blankAsNull()
+                    DataStore.fakeDNSRange4.get().blankAsNull()
                 }
                 val fakeRange6 = if (networkStrategy == SingBoxOptions.STRATEGY_IPV4_ONLY) {
                     null
                 } else {
-                    DataStore.fakeDNSRange6.blankAsNull()
+                    DataStore.fakeDNSRange6.get().blankAsNull()
                 }
                 dns!!.servers!!.add(
                     NewDNSServerOptions_FakeIPDNSServerOptions().apply {
@@ -1626,7 +1610,7 @@ fun buildConfig(
         if (forExport) {
             // "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs"
             val pathPrefix = "https://raw.githubusercontent.com"
-            val provider = DataStore.rulesProvider
+            val provider = DataStore.rulesProvider.get()
 
             val normalBranch = "rule-set"
             val geoipBranch = normalBranch

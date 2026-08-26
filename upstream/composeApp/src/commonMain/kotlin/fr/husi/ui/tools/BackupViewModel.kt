@@ -10,14 +10,12 @@ import fr.husi.database.ProxyEntity
 import fr.husi.database.ProxyGroup
 import fr.husi.database.RuleEntity
 import fr.husi.database.SagerDatabase
-import fr.husi.fmt.KryoConverters
+import fr.husi.fmt.BeanConverters
 import fr.husi.ktx.Logs
 import fr.husi.ktx.b64Decode
 import fr.husi.ktx.b64EncodeUrlSafe
 import fr.husi.ktx.currentBackupFileTimestamp
 import fr.husi.ktx.kxs
-import fr.husi.ktx.onDefaultDispatcher
-import fr.husi.ktx.onIoDispatcher
 import fr.husi.ktx.readableMessage
 import fr.husi.ktx.runOnDefaultDispatcher
 import java.io.File
@@ -27,9 +25,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -107,7 +104,7 @@ internal class BackupViewModel : ViewModel() {
 
     fun export() = viewModelScope.launch {
         val state = uiState.value
-        val content = onIoDispatcher {
+        val content = withContext(Dispatchers.IO) {
             createBackup(state.backupGroupsAndConfig, state.backupRules, state.backupSettings)
         }
         uiState.update { state ->
@@ -152,7 +149,7 @@ internal class BackupViewModel : ViewModel() {
             val backup = kxs.decodeFromString<BackupPayload>(content)
             val version = backup.version
             if (version != BACKUP_VERSION) error("Unsupported backup version $version (expected $BACKUP_VERSION)")
-            onDefaultDispatcher {
+            withContext(Dispatchers.Default) {
                 uiState.update { state ->
                     state.copy(
                         inputResult = backup,
@@ -187,9 +184,9 @@ internal class BackupViewModel : ViewModel() {
             val profiles = mutableListOf<ProxyEntity>()
             for (entry in content.profiles) {
                 val data = entry.b64Decode()
-                profiles.add(KryoConverters.deserialize(ProxyEntity(), data))
+                profiles.add(BeanConverters.deserialize(ProxyEntity(), data))
             }
-            onIoDispatcher {
+            withContext(Dispatchers.IO) {
                 SagerDatabase.proxyDao.reset()
                 SagerDatabase.proxyDao.insert(profiles)
             }
@@ -197,28 +194,28 @@ internal class BackupViewModel : ViewModel() {
             val groups = mutableListOf<ProxyGroup>()
             for (entry in content.groups.orEmpty()) {
                 val data = entry.b64Decode()
-                groups.add(KryoConverters.deserialize(ProxyGroup(), data))
+                groups.add(BeanConverters.deserialize(ProxyGroup(), data))
             }
-            onIoDispatcher {
+            withContext(Dispatchers.IO) {
                 SagerDatabase.groupDao.reset()
                 SagerDatabase.groupDao.insert(groups)
             }
         }
         if (rule && content.rules != null) {
             val rules = content.rules
-            onIoDispatcher {
+            withContext(Dispatchers.IO) {
                 SagerDatabase.rulesDao.reset()
                 SagerDatabase.rulesDao.insert(rules)
             }
 
             val assets = content.assets.orEmpty()
-            onIoDispatcher {
+            withContext(Dispatchers.IO) {
                 SagerDatabase.assetDao.reset()
                 SagerDatabase.assetDao.insert(assets)
             }
         }
         if (setting && content.settings != null) {
-            onIoDispatcher {
+            withContext(Dispatchers.IO) {
                 when (val rawSettings = content.settings) {
                     is JsonArray -> {
                         importLegacySettingPairs(rawSettings)
@@ -263,6 +260,6 @@ internal class BackupViewModel : ViewModel() {
     }
 
     private fun fr.husi.fmt.Serializable.toBase64Str(): String {
-        return KryoConverters.serialize(this).b64EncodeUrlSafe()
+        return BeanConverters.serialize(this).b64EncodeUrlSafe()
     }
 }

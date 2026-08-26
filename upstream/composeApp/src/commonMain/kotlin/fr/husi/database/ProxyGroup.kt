@@ -6,11 +6,11 @@ import androidx.room.Insert
 import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Update
-import com.esotericsoftware.kryo.io.ByteBufferInput
-import com.esotericsoftware.kryo.io.ByteBufferOutput
 import fr.husi.GroupOrder
 import fr.husi.GroupType
 import fr.husi.fmt.Serializable
+import fr.husi.io.BinaryInput
+import fr.husi.io.BinaryOutput
 import fr.husi.ktx.applyDefaultValues
 import fr.husi.ktx.blankAsNull
 import fr.husi.repository.resolveRepository
@@ -18,6 +18,16 @@ import kotlinx.coroutines.flow.Flow
 import fr.husi.resources.*
 import kotlinx.coroutines.runBlocking
 
+/**
+ * A group is a container of proxies.
+ * NEVER add options that re-configs proxies when building config.
+ * The options re-configs proxies leads to ambiguous: what should we do if a proxy set / chain
+ * imports proxy in other groups, while its groups also have per-group override options.
+ * Negative example: font/landing proxy, group-level uTLS fingerprint, or make a group selector.
+ *
+ * [SubscriptionBean.forceResolve] is an exception. Because it is strong coupling with subscription,
+ * and it does not modify proxies when building config.
+ */
 @Entity(tableName = "proxy_groups")
 data class ProxyGroup(
     @PrimaryKey(autoGenerate = true) var id: Long = 0L,
@@ -27,6 +37,8 @@ data class ProxyGroup(
     var type: Int = GroupType.BASIC,
     var subscription: SubscriptionBean? = null,
     var order: Int = GroupOrder.ORIGIN,
+
+    // TODO remove them on next database bump
     var frontProxy: Long = -1L,
     var landingProxy: Long = -1L,
 ) : Serializable() {
@@ -38,7 +50,7 @@ data class ProxyGroup(
         subscription?.applyDefaultValues()
     }
 
-    override fun serializeToBuffer(output: ByteBufferOutput) {
+    override fun serializeToBuffer(output: BinaryOutput) {
         if (export) {
 
             output.writeInt(0)
@@ -62,11 +74,11 @@ data class ProxyGroup(
         }
     }
 
-    override fun deserializeFromBuffer(input: ByteBufferInput) {
+    override fun deserializeFromBuffer(input: BinaryInput) {
         if (export) {
             val version = input.readInt()
 
-            name = input.readString()
+            name = input.readNullableString()
             type = input.readInt()
             val subscription = SubscriptionBean()
             this.subscription = subscription
@@ -78,7 +90,7 @@ data class ProxyGroup(
             id = input.readLong()
             userOrder = input.readLong()
             ungrouped = input.readBoolean()
-            name = input.readString()
+            name = input.readNullableString()
             type = input.readInt()
 
             if (type == GroupType.SUBSCRIPTION) {
@@ -100,7 +112,7 @@ data class ProxyGroup(
     @androidx.room.Dao
     interface Dao {
 
-        @Query("SELECT * FROM proxy_groups ORDER BY userOrder")
+        @Query("SELECT * FROM proxy_groups ORDER BY userOrder, id")
         fun allGroups(): Flow<List<ProxyGroup>>
 
         @Query("SELECT * FROM proxy_groups WHERE type = ${GroupType.SUBSCRIPTION}")
@@ -109,7 +121,7 @@ data class ProxyGroup(
         @Query("SELECT MAX(userOrder) + 1 FROM proxy_groups")
         suspend fun nextOrder(): Long?
 
-        @Query("SELECT id FROM proxy_groups ORDER BY userOrder LIMIT 1")
+        @Query("SELECT id FROM proxy_groups ORDER BY userOrder, id LIMIT 1")
         suspend fun firstGroupId(): Long?
 
         @Query("SELECT id FROM proxy_groups WHERE ungrouped = 1 LIMIT 1")

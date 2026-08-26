@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-GO_VERSION="1.26.6"
+GO_VERSION="1.27.0"
 JAVA_VERSION="21"
 # https://github.com/JetBrains/JetBrainsRuntime
 # Bundled into the Windows JBR packages. The feature version has to stay
@@ -26,4 +26,4 @@ MACOS_SDK_COMMIT="896cd40df984b847d486723edce50e247385617e"
 GEOIP_VERSION="20260812"
 
 # https://github.com/v2fly/domain-list-community
-GEOSITE_VERSION="20260816111744"
+GEOSITE_VERSION="20260824014107"

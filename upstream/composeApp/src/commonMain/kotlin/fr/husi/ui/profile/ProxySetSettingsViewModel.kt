@@ -11,19 +11,23 @@ import fr.husi.database.SagerDatabase
 import fr.husi.fmt.internal.ProxySetBean
 import fr.husi.ktx.applyDefaultValues
 import fr.husi.ktx.blankAsNull
-import fr.husi.ktx.onDefaultDispatcher
 import fr.husi.resources.Res
 import fr.husi.resources.circular_reference
 import fr.husi.resources.circular_reference_sum
 import fr.husi.resources.duplicate_name
 import fr.husi.resources.error_title
 import fr.husi.ui.StringOrRes
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toImmutableList
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Immutable
 internal sealed interface ProviderUiItem {
@@ -58,7 +62,7 @@ internal data class ProxySetUiState(
     val testIdleTimeout: String = "",
     val testTolerance: Int = 50,
 
-    val providers: List<ProviderUiItem> = emptyList(),
+    val providers: ImmutableList<ProviderUiItem> = persistentListOf(),
     val groups: LinkedHashMap<Long, ProxyGroup> = LinkedHashMap(),
 ) : ProfileEditorUiState
 
@@ -113,7 +117,7 @@ internal class ProxySetSettingsViewModel : ProfileEditorViewModel<ProxySetBean>(
 
         val singleIDs = providers.filterIsInstance<ProxySetBean.Provider.Single>().map { it.id }
         val profiles = ProfileManager.getProfiles(singleIDs).associateBy { it.id }
-        val items = onDefaultDispatcher {
+        val items = withContext(Dispatchers.Default) {
             val items = ArrayList<ProviderUiItem>(providers.size)
             for (provider in providers) {
                 when (provider) {
@@ -133,32 +137,31 @@ internal class ProxySetSettingsViewModel : ProfileEditorViewModel<ProxySetBean>(
             }
             items
         }
-        uiState.update {
-            it.copy(groups = groupMap, providers = items)
+        uiState.update { state ->
+            state.copy(groups = groupMap, providers = items.toImmutableList())
         }
     }
 
     fun submitReorder(changes: List<OrderedItem<ProviderUiItem>>) {
         invalidateProviderMutation()
-        val current = uiState.value.providers
-        val changesMap = changes.associate { it.value.key to it.newIndex }
 
-        val reordered = current.sortedBy { item ->
-            changesMap[item.key] ?: current.indexOf(item)
-        }
-
-        uiState.update {
-            it.copy(providers = reordered)
+        uiState.update { state ->
+            val current = state.providers
+            val changesMap = changes.associate { it.value.key to it.newIndex }
+            val reordered = current.sortedBy { item ->
+                changesMap[item.key] ?: current.indexOf(item)
+            }
+            state.copy(providers = reordered.toImmutableList())
         }
     }
 
     fun remove(index: Int) {
         invalidateProviderMutation()
-        val providers = uiState.value.providers.toMutableList()
-        if (index !in providers.indices) return
-        providers.removeAt(index)
-        uiState.update {
-            it.copy(providers = providers)
+        uiState.update { state ->
+            if (index !in state.providers.indices) return
+            val providers = state.providers.toMutableList()
+            providers.removeAt(index)
+            state.copy(providers = providers.toImmutableList())
         }
     }
 
@@ -194,57 +197,48 @@ internal class ProxySetSettingsViewModel : ProfileEditorViewModel<ProxySetBean>(
         mutationJob = viewModelScope.launch {
             val profile = ProfileManager.getProfile(id)!!
             if (version != mutationVersion) return@launch
-            val providers = uiState.value.providers.toMutableList()
-            if (replacingIndex >= providers.size) return@launch
-            val alreadySelected = providers.filterIndexed { index, item ->
-                index != replacingIndex
-                        && item is ProviderUiItem.Profile
-                        && item.entity.id == id
-            }
-            if (alreadySelected.isNotEmpty()) {
-                emitAlert(
-                    title = StringOrRes.Res(Res.string.duplicate_name),
-                    message = StringOrRes.Direct(profile.displayName()),
-                )
-                return@launch
-            }
-            val otherProfiles = currentMemberProfiles(replacingIndex)
-            if (!profile.canAdd(otherProfiles)) {
+            uiState.update { state ->
+                val providers = state.providers.toMutableList()
+                if (replacingIndex >= providers.size) return@launch
+                val alreadySelected = providers.filterIndexed { index, item ->
+                    index != replacingIndex
+                            && item is ProviderUiItem.Profile
+                            && item.entity.id == id
+                }
+                if (alreadySelected.isNotEmpty()) {
+                    emitAlert(
+                        title = StringOrRes.Res(Res.string.duplicate_name),
+                        message = StringOrRes.Direct(profile.displayName()),
+                    )
+                    return@launch
+                }
+                val otherProfiles = currentMemberProfiles(replacingIndex)
+                if (!profile.canAdd(otherProfiles)) {
+                    if (version != mutationVersion) return@launch
+                    emitAlert(
+                        title = StringOrRes.Res(Res.string.circular_reference),
+                        message = StringOrRes.Res(Res.string.circular_reference_sum),
+                    )
+                    return@launch
+                }
                 if (version != mutationVersion) return@launch
-                emitAlert(
-                    title = StringOrRes.Res(Res.string.circular_reference),
-                    message = StringOrRes.Res(Res.string.circular_reference_sum),
-                )
-                return@launch
-            }
-            if (version != mutationVersion) return@launch
-            if (replacingIndex < 0) {
-                providers.add(ProviderUiItem.Profile(newItemKey(), profile))
-            } else {
-                providers[replacingIndex] =
-                    ProviderUiItem.Profile(providers[replacingIndex].key, profile)
-            }
-            uiState.update {
-                it.copy(providers = providers)
+                if (replacingIndex < 0) {
+                    providers.add(ProviderUiItem.Profile(newItemKey(), profile))
+                } else {
+                    providers[replacingIndex] =
+                        ProviderUiItem.Profile(providers[replacingIndex].key, profile)
+                }
+                state.copy(providers = providers.toImmutableList())
             }
         }
     }
 
     private suspend fun ProxyEntity.canAdd(otherProfiles: List<ProxyEntity>): Boolean {
-        if (containsProfileReference(editingId, includeGroupProxies = false)) return false
+        if (containsProfileReference(editingId)) return false
         for (existingProfile in otherProfiles) {
-            if (existingProfile.containsProfileReference(id, includeGroupProxies = false)) {
+            if (existingProfile.containsProfileReference(id)) {
                 return false
             }
-        }
-        if (
-            !isNew && groupProxiesOverlapProfileReferences(
-                groupId = proxyEntity.groupId,
-                rootProfileId = editingId,
-                memberProfiles = otherProfiles + this,
-            )
-        ) {
-            return false
         }
         return true
     }
@@ -331,23 +325,11 @@ internal class ProxySetSettingsViewModel : ProfileEditorViewModel<ProxySetBean>(
             }
             for (profile in selectedProfiles) {
                 if (version != mutationVersion) return@launch
-                if (profile.containsProfileReference(editingId, includeGroupProxies = false)) {
+                if (profile.containsProfileReference(editingId)) {
                     if (version != mutationVersion) return@launch
                     emitCircularReference()
                     return@launch
                 }
-            }
-            val otherProfiles = currentMemberProfiles(index)
-            if (
-                !isNew && groupProxiesOverlapProfileReferences(
-                    groupId = proxyEntity.groupId,
-                    rootProfileId = editingId,
-                    memberProfiles = otherProfiles + selectedProfiles,
-                )
-            ) {
-                if (version != mutationVersion) return@launch
-                emitCircularReference()
-                return@launch
             }
 
             if (version != mutationVersion) return@launch
@@ -368,7 +350,7 @@ internal class ProxySetSettingsViewModel : ProfileEditorViewModel<ProxySetBean>(
                         ),
                     )
                 }
-                state.copy(providers = providers)
+                state.copy(providers = providers.toImmutableList())
             }
         }
     }

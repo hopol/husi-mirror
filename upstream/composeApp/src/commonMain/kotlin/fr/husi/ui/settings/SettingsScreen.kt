@@ -12,13 +12,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import fr.husi.Key
 import fr.husi.compose.BoxedVerticalScrollbar
+import fr.husi.compose.collectAsStateWithLifecycle
 import fr.husi.compose.IconMaskColors
 import fr.husi.compose.MaskedIcon
+import fr.husi.compose.Preference
 import fr.husi.compose.PreferenceCategory
-import fr.husi.compose.PreferenceDivider
 import fr.husi.compose.fadingEdge
 import fr.husi.compose.material3.Text
 import fr.husi.compose.preferenceGroup
@@ -59,7 +58,6 @@ import fr.husi.resources.wifi
 import fr.husi.ui.NavRoutes
 import io.github.oikvpqya.compose.fastscroller.material3.defaultMaterialScrollbarStyle
 import io.github.oikvpqya.compose.fastscroller.rememberScrollbarAdapter
-import me.zhanghai.compose.preference.Preference
 import me.zhanghai.compose.preference.ProvidePreferenceLocals
 import org.jetbrains.compose.resources.stringResource
 
@@ -73,9 +71,7 @@ fun SettingsScreen(
     openRemoteControl: () -> Unit,
 ) {
     val listState = rememberLazyListState()
-    val isExpert by DataStore.configurationStore
-        .booleanFlow(Key.APP_EXPERT, false)
-        .collectAsStateWithLifecycle(false)
+    val isExpert by DataStore.isExpert.collectAsStateWithLifecycle()
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -104,7 +100,6 @@ fun SettingsScreen(
                             onClick = { openSettingsPage(NavRoutes.SettingsPage.Kind.General) },
                         )
                         if (!PlatformInfo.isAndroid) {
-                            PreferenceDivider()
                             Preference(
                                 title = { Text(stringResource(Res.string.system_daemon)) },
                                 icon = {
@@ -116,7 +111,6 @@ fun SettingsScreen(
                                 onClick = { openSettingsPage(NavRoutes.SettingsPage.Kind.Daemon) },
                             )
                         }
-                        PreferenceDivider()
                         Preference(
                             title = { Text(stringResource(Res.string.route_options)) },
                             icon = {
@@ -127,7 +121,6 @@ fun SettingsScreen(
                             },
                             onClick = { openSettingsPage(NavRoutes.SettingsPage.Kind.Route) },
                         )
-                        PreferenceDivider()
                         Preference(
                             title = { Text(stringResource(Res.string.protocol_settings)) },
                             icon = {
@@ -138,7 +131,6 @@ fun SettingsScreen(
                             },
                             onClick = { openSettingsPage(NavRoutes.SettingsPage.Kind.Protocol) },
                         )
-                        PreferenceDivider()
                         Preference(
                             title = { Text(stringResource(Res.string.cag_dns)) },
                             icon = {
@@ -149,7 +141,6 @@ fun SettingsScreen(
                             },
                             onClick = { openSettingsPage(NavRoutes.SettingsPage.Kind.Dns) },
                         )
-                        PreferenceDivider()
                         Preference(
                             title = { Text(stringResource(Res.string.inbound_settings)) },
                             icon = {
@@ -160,7 +151,6 @@ fun SettingsScreen(
                             },
                             onClick = { openSettingsPage(NavRoutes.SettingsPage.Kind.Inbound) },
                         )
-                        PreferenceDivider()
                         Preference(
                             title = { Text(stringResource(Res.string.cag_misc)) },
                             icon = {
@@ -171,7 +161,6 @@ fun SettingsScreen(
                             },
                             onClick = { openSettingsPage(NavRoutes.SettingsPage.Kind.Misc) },
                         )
-                        PreferenceDivider()
                         Preference(
                             title = { Text(stringResource(Res.string.ntp_category)) },
                             icon = {
@@ -196,7 +185,6 @@ fun SettingsScreen(
                             },
                             onClick = openRemoteControl,
                         )
-                        PreferenceDivider()
                         Preference(
                             title = { Text(stringResource(Res.string.tools_network)) },
                             icon = {
@@ -207,7 +195,6 @@ fun SettingsScreen(
                             },
                             onClick = { openTool(NavRoutes.ToolsPage.Network) },
                         )
-                        PreferenceDivider()
                         Preference(
                             title = { Text(stringResource(Res.string.backup)) },
                             icon = {
@@ -219,7 +206,6 @@ fun SettingsScreen(
                             onClick = { openTool(NavRoutes.ToolsPage.Backup) },
                         )
                         if (isExpert) {
-                            PreferenceDivider()
                             Preference(
                                 title = { Text("DEBUG") },
                                 icon = {
@@ -231,7 +217,6 @@ fun SettingsScreen(
                                 onClick = { openTool(NavRoutes.ToolsPage.Debug) },
                             )
                         }
-                        PreferenceDivider()
                         Preference(
                             title = { Text(stringResource(Res.string.plugin)) },
                             icon = {
@@ -242,7 +227,6 @@ fun SettingsScreen(
                             },
                             onClick = openPlugin,
                         )
-                        PreferenceDivider()
                         Preference(
                             title = { Text(stringResource(Res.string.menu_about)) },
                             icon = {

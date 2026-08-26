@@ -72,7 +72,7 @@ fun parseHysteria2(link: String): HysteriaBean {
             url.username + ":" + url.password
         }
 
-        // name = url.fragment
+        name = url.fragment
 
         sni = url.queryParameter("sni")
         allowInsecure = url.parseBoolean("insecure")
@@ -108,13 +108,13 @@ fun HysteriaBean.toUri(): String {
         username = authPayload
     }
 
+    if (name.isNotBlank()) {
+        url.fragment = name
+    }
     if (allowInsecure) {
         url.addQueryParameter("insecure", "1")
     }
     if (protocolVersion == HysteriaBean.PROTOCOL_VERSION_1) {
-        name.blankAsNull()?.let {
-            url.fragment = it
-        }
         if (sni.isNotBlank()) {
             url.addQueryParameter("peer", sni)
         }
@@ -246,18 +246,19 @@ fun HysteriaBean.buildHysteriaConfig(
                 if (streamReceiveWindow > 0) put("recv_window_conn", streamReceiveWindow)
                 if (connectionReceiveWindow > 0) put("recv_window", connectionReceiveWindow)
                 if (disableMtuDiscovery) put("disable_mtu_discovery", true)
-                DataStore.localDNSPort.takeIf { it > 0 }?.let {
+                val localDNSPort = DataStore.localDNSPort.getBlocking()
+                localDNSPort.takeIf { it > 0 }?.let {
                     put("resolver", "udp://127.0.0.1:$it")
                 }
                 if (hopSeconds > 0) put("hop_interval", hopSeconds)
-                put("up_mbps", generateUploadSpeed())
-                put("down_mbps", generateDownloadSpeed())
+                put("up_mbps", generateHy1Speed(DataStore.uploadSpeed.getBlocking()))
+                put("down_mbps", generateHy1Speed(DataStore.downloadSpeed.getBlocking()))
             }.toJsonStringKxs()
         }
 
         HysteriaBean.PROTOCOL_VERSION_2 -> {
-            val uploadSpeed = DataStore.uploadSpeed
-            val downloadSpeed = DataStore.downloadSpeed
+            val uploadSpeed = DataStore.uploadSpeed.getBlocking()
+            val downloadSpeed = DataStore.downloadSpeed.getBlocking()
             var caPath: String? = null
             var certPath: String? = null
             var keyPath: String? = null
@@ -399,8 +400,8 @@ fun HysteriaBean.buildHysteriaConfig(
     }
 }
 
-fun HysteriaBean.canUseSingBox(): Boolean {
-    if (DataStore.providerHysteria2 != ProtocolProvider.CORE) return false // Force plugin
+suspend fun HysteriaBean.canUseSingBox(): Boolean {
+    if (DataStore.providerHysteria2.get() != ProtocolProvider.CORE) return false // Force plugin
     if (protocolVersion == HysteriaBean.PROTOCOL_VERSION_1
         && protocol != HysteriaBean.PROTOCOL_UDP
     ) {
@@ -409,7 +410,7 @@ fun HysteriaBean.canUseSingBox(): Boolean {
     return true
 }
 
-fun buildSingBoxOutboundHysteriaBean(bean: HysteriaBean): SingBoxOptions.Outbound {
+suspend fun buildSingBoxOutboundHysteriaBean(bean: HysteriaBean): SingBoxOptions.Outbound {
     return when (bean.protocolVersion) {
         HysteriaBean.PROTOCOL_VERSION_1 -> SingBoxOptions.Outbound_HysteriaOptions().apply {
             type = SingBoxOptions.TYPE_HYSTERIA
@@ -418,8 +419,8 @@ fun buildSingBoxOutboundHysteriaBean(bean: HysteriaBean): SingBoxOptions.Outboun
                 is HopPort.Single -> server_port = hopPort.port
                 is HopPort.Ports -> server_ports = hopPort.singStyle().toMutableList()
             }
-            up_mbps = generateUploadSpeed()
-            down_mbps = generateDownloadSpeed()
+            up_mbps = generateHy1Speed(DataStore.uploadSpeed.get())
+            down_mbps = generateHy1Speed(DataStore.downloadSpeed.get())
             obfs = bean.obfsPassword
             if (bean.disableMtuDiscovery) disable_path_mtu_discovery = true
             when (bean.authPayloadType) {
@@ -481,8 +482,8 @@ fun buildSingBoxOutboundHysteriaBean(bean: HysteriaBean): SingBoxOptions.Outboun
                     server_ports = hopPort.singStyle().toMutableList()
                 }
             }
-            up_mbps = DataStore.uploadSpeed
-            down_mbps = DataStore.downloadSpeed
+            up_mbps = DataStore.uploadSpeed.get()
+            down_mbps = DataStore.downloadSpeed.get()
             bean.obfsType.blankAsNull()?.let { obfsType ->
                 obfs = SingBoxOptions.Hysteria2Obfs().apply {
                     type = obfsType
@@ -597,20 +598,10 @@ const val DEFAULT_SPEED = 10
 
 // Just use for Hy1
 
-private fun generateDownloadSpeed(): Int = DataStore.downloadSpeed.let {
-    if (it <= 0) {
-        DEFAULT_SPEED
-    } else {
-        it
-    }
-}
-
-private fun generateUploadSpeed(): Int = DataStore.uploadSpeed.let {
-    if (it <= 0) {
-        DEFAULT_SPEED
-    } else {
-        it
-    }
+private fun generateHy1Speed(speed: Int): Int = if (speed <= 0) {
+    DEFAULT_SPEED
+} else {
+    speed
 }
 
 fun parseHysteria1Outbound(json: JSONMap): HysteriaBean = HysteriaBean().apply {

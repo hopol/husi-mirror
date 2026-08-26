@@ -6,7 +6,7 @@ import androidx.room.Database
 import androidx.room.RoomDatabase
 import androidx.room.RoomDatabaseConstructor
 import androidx.room.TypeConverters
-import fr.husi.fmt.KryoConverters
+import fr.husi.fmt.BeanConverters
 
 @Database(
     entities = [
@@ -17,6 +17,7 @@ import fr.husi.fmt.KryoConverters
         PluginEntity::class,
         RemoteServerEntity::class,
     ],
+    // TODO remove group front and landing proxy
     version = 22,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
@@ -41,7 +42,7 @@ import fr.husi.fmt.KryoConverters
         AutoMigration(from = 21, to = 22),
     ],
 )
-@TypeConverters(value = [KryoConverters::class])
+@TypeConverters(value = [BeanConverters::class])
 @ConstructedBy(SagerDatabaseConstructor::class)
 abstract class SagerDatabase : RoomDatabase() {
 

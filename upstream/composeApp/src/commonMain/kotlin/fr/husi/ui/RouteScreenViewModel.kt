@@ -9,9 +9,9 @@ import fr.husi.database.DataStore
 import fr.husi.database.ProfileManager
 import fr.husi.database.RuleEntity
 import fr.husi.database.SagerDatabase
-import fr.husi.ktx.onIoDispatcher
 import fr.husi.ktx.runOnDefaultDispatcher
 import fr.husi.ktx.runOnIoDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlin.time.Duration.Companion.milliseconds
 
 @Immutable
@@ -49,7 +50,7 @@ class RouteScreenViewModel : ViewModel() {
     private val hiddenRules = mutableSetOf<Long>()
 
     private suspend fun reloadRules(_rules: List<RuleEntity>?) {
-        val rules = _rules ?: onIoDispatcher {
+        val rules = _rules ?: withContext(Dispatchers.IO) {
             ProfileManager.getRules().first()
         }
         hiddenRulesAccess.withLock {
@@ -64,7 +65,7 @@ class RouteScreenViewModel : ViewModel() {
 
     fun reset() = runOnIoDispatcher {
         SagerDatabase.rulesDao.reset()
-        DataStore.rulesFirstCreate = false
+        DataStore.rulesFirstCreate.set(false)
         reloadRules(null)
     }
 
@@ -77,17 +78,25 @@ class RouteScreenViewModel : ViewModel() {
     }
 
     fun submitReorder(changes: List<OrderedItem<RuleEntity>>) = runOnDefaultDispatcher {
-        val toUpdate = changes.mapNotNull { orderedItem ->
-            val newUserOrder = orderedItem.newIndex.toLong()
-            if (orderedItem.value.userOrder != newUserOrder) {
-                orderedItem.value.copy(
-                    userOrder = newUserOrder,
-                )
+        if (changes.isEmpty()) return@runOnDefaultDispatcher
+
+        val reordered = uiState.value.rules.toMutableList()
+        for (change in changes) {
+            if (change.newIndex !in reordered.indices) {
+                return@runOnDefaultDispatcher
+            }
+            reordered[change.newIndex] = change.value
+        }
+
+        val toUpdate = reordered.mapIndexedNotNull { index, rule ->
+            val newUserOrder = (index + 1).toLong()
+            if (rule.userOrder != newUserOrder) {
+                rule.copy(userOrder = newUserOrder)
             } else {
                 null
             }
         }
-        if (toUpdate.isNotEmpty()) onIoDispatcher {
+        if (toUpdate.isNotEmpty()) withContext(Dispatchers.IO) {
             SagerDatabase.rulesDao.updateRules(toUpdate)
         }
     }
@@ -135,7 +144,7 @@ class RouteScreenViewModel : ViewModel() {
             hiddenRules.clear()
             toDelete
         }
-        onIoDispatcher {
+        withContext(Dispatchers.IO) {
             ProfileManager.deleteRulesByIds(toDelete)
         }
     }

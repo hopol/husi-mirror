@@ -12,7 +12,6 @@ import fr.husi.Key
 import fr.husi.database.DataStore
 import fr.husi.database.SagerDatabase
 import fr.husi.ktx.Logs
-import fr.husi.ktx.onIoDispatcher
 import fr.husi.lib.R
 import fr.husi.repository.resolveRepository
 import fr.husi.resources.Res
@@ -24,6 +23,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import android.net.VpnService as BaseVpnService
 import android.service.quicksettings.TileService as BaseTileService
 
@@ -125,7 +125,7 @@ class TileService : BaseTileService() {
      * Inspired by: [WireGuard Android QuickTileService.kt](https://github.com/WireGuard/wireguard-android/blob/e7b3a3c118836e112620b1302a8ba1873ad4daac/ui/src/main/java/com/wireguard/android/QuickTileService.kt)
      */
     private fun startServiceFromTile() {
-        if (DataStore.serviceMode == Key.MODE_VPN && BaseVpnService.prepare(this) != null) {
+        if (DataStore.serviceMode.getBlocking() == Key.MODE_VPN && BaseVpnService.prepare(this) != null) {
             // Consent is missing: the foreground service start is doomed anyway, and
             // VpnService would then try to launch the consent activity from the background,
             // which Android 10 forbids. Go straight through the activity.
@@ -174,8 +174,8 @@ class TileService : BaseTileService() {
         scope.launch {
             val state = DataStore.serviceState
             val profileName = if (state.connected) {
-                onIoDispatcher {
-                    val profileId = DataStore.currentProfile
+                withContext(Dispatchers.IO) {
+                    val profileId = DataStore.currentProfile.get()
                     if (profileId <= 0L) {
                         null
                     } else {
