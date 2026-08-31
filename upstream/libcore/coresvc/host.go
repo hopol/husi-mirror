@@ -27,17 +27,17 @@ import (
 type Host struct {
 	access sync.Mutex
 
-	ctx         context.Context
-	version     string
-	logMaxLines int
-	appHandler  AppHandler
+	ctx              context.Context
+	version          string
+	buildEnvironment string
+	logMaxLines      int
+	appHandler       AppHandler
 
 	started *daemon.StartedService
 	holder  *InstanceContextHolder
 	events  *eventBroadcaster
 
-	backend       Backend
-	extraServices ExtraServiceRegistrar
+	services      []ServiceRegistrar
 	fileLogSink   log.PlatformWriter
 	serverOptions []grpc.ServerOption
 	// skipDefaultInterceptors omits the built-in locale interceptors when the
@@ -52,16 +52,17 @@ type Host struct {
 }
 
 type HostOptions struct {
-	Context     context.Context
-	Version     string
-	LogMaxLines int
-	AppHandler  AppHandler
+	Context          context.Context
+	Version          string
+	BuildEnvironment string
+	LogMaxLines      int
+	AppHandler       AppHandler
 
-	Backend Backend
 	// FileLogSink is attached after a successful StartOrReloadService so box
 	// logs also land in stderr.log. Optional.
-	FileLogSink   log.PlatformWriter
-	ExtraServices ExtraServiceRegistrar
+	FileLogSink log.PlatformWriter
+	// Services contribute the gRPC surfaces the Host does not implement itself.
+	Services      []ServiceRegistrar
 	ServerOptions []grpc.ServerOption
 	// SkipDefaultInterceptors skips the built-in locale interceptors. Use when
 	// ServerOptions already chain locale + auth in the desired order.
@@ -90,17 +91,16 @@ func NewHost(options HostOptions) (*Host, error) {
 		Handler:     platformHandler{},
 		LogMaxLines: logMaxLines,
 	})
-	backend := cmp.Or[Backend](options.Backend, UnimplementedBackend{})
 	h := &Host{
 		ctx:                     options.Context,
 		version:                 options.Version,
+		buildEnvironment:        options.BuildEnvironment,
 		logMaxLines:             logMaxLines,
 		appHandler:              options.AppHandler,
 		started:                 started,
 		holder:                  holder,
 		events:                  newEventBroadcaster(),
-		backend:                 backend,
-		extraServices:           options.ExtraServices,
+		services:                options.Services,
 		fileLogSink:             options.FileLogSink,
 		serverOptions:           options.ServerOptions,
 		skipDefaultInterceptors: options.SkipDefaultInterceptors,
@@ -149,12 +149,12 @@ func (h *Host) Start(socketPath string) error {
 		return E.New("missing socket path")
 	}
 
-	_ = os.Remove(socketPath)
+	err := clearSocketPath(socketPath)
+	if err != nil {
+		return err
+	}
 	// Copied from libbox / previous vario path: Android early-boot EROFS quirk.
-	var (
-		listener net.Listener
-		err      error
-	)
+	var listener net.Listener
 	for range 30 {
 		var unixListener *net.UnixListener
 		unixListener, err = net.ListenUnix("unix", &net.UnixAddr{
@@ -174,6 +174,46 @@ func (h *Host) Start(socketPath string) error {
 		return E.Cause(err, "listen command server")
 	}
 	return h.StartOn(listener)
+}
+
+func clearSocketPath(socketPath string) error {
+	_, err := os.Stat(socketPath)
+	if err != nil {
+		return nil
+	}
+	const liveHostTimeout = 500 * time.Millisecond
+	conn, err := net.DialTimeout("unix", socketPath, liveHostTimeout)
+	if err == nil {
+		_ = conn.Close()
+		return E.New("another core host is serving ", socketPath)
+	}
+	err = os.Remove(socketPath)
+	if err != nil && !os.IsNotExist(err) {
+		return E.Cause(err, "remove stale socket")
+	}
+	return nil
+}
+
+func (h *Host) NewServiceServer(serverOptions ...grpc.ServerOption) *grpc.Server {
+	server := grpc.NewServer(serverOptions...)
+	daemon.RegisterStartedServiceServer(server, h.started)
+	husiv1.RegisterCoreServiceServer(server, &coreService{host: h})
+	if h.appHandler != nil {
+		husiv1.RegisterAppServiceServer(server, &appService{host: h})
+	}
+
+	healthServer := health.NewServer()
+	ServingStatus(healthServer, daemon.StartedService_ServiceDesc.ServiceName)
+	ServingStatus(healthServer, husiv1.CoreService_ServiceDesc.ServiceName)
+	if h.appHandler != nil {
+		ServingStatus(healthServer, husiv1.AppService_ServiceDesc.ServiceName)
+	}
+	for _, registrar := range h.services {
+		registrar.RegisterServices(server, healthServer)
+	}
+	grpc_health_v1.RegisterHealthServer(server, healthServer)
+	reflection.Register(server)
+	return server
 }
 
 // StartOn serves the gRPC surface on an existing listener (UDS, named pipe, TCP).
@@ -196,26 +236,7 @@ func (h *Host) StartOn(listener net.Listener) error {
 		)
 	}
 	serverOpts = append(serverOpts, h.serverOptions...)
-	server := grpc.NewServer(serverOpts...)
-	daemon.RegisterStartedServiceServer(server, h.started)
-	husiv1.RegisterCoreServiceServer(server, &coreService{host: h})
-	husiv1.RegisterApplicationServiceServer(server, &applicationService{host: h})
-	if h.appHandler != nil {
-		husiv1.RegisterAppServiceServer(server, &appService{host: h})
-	}
-
-	healthServer := health.NewServer()
-	healthServer.SetServingStatus(daemon.StartedService_ServiceDesc.ServiceName, grpc_health_v1.HealthCheckResponse_SERVING)
-	healthServer.SetServingStatus(husiv1.CoreService_ServiceDesc.ServiceName, grpc_health_v1.HealthCheckResponse_SERVING)
-	healthServer.SetServingStatus(husiv1.ApplicationService_ServiceDesc.ServiceName, grpc_health_v1.HealthCheckResponse_SERVING)
-	if h.appHandler != nil {
-		healthServer.SetServingStatus(husiv1.AppService_ServiceDesc.ServiceName, grpc_health_v1.HealthCheckResponse_SERVING)
-	}
-	if h.extraServices != nil {
-		h.extraServices.RegisterExtraServices(server, healthServer)
-	}
-	grpc_health_v1.RegisterHealthServer(server, healthServer)
-	reflection.Register(server)
+	server := h.NewServiceServer(serverOpts...)
 
 	h.server = server
 	h.listener = listener

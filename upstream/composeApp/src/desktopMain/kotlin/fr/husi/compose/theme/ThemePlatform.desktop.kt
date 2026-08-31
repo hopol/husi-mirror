@@ -9,5 +9,6 @@ internal actual fun isDynamicThemeSupported(): Boolean = false
 @Composable
 internal actual fun rememberDynamicColorScheme(isDarkMode: Boolean): ColorScheme? = null
 
+// replace with official unless official detect mode switching in an elegant way.
 @Composable
 actual fun rememberPlatformSystemDarkMode(): Boolean = isSystemInDarkMode()

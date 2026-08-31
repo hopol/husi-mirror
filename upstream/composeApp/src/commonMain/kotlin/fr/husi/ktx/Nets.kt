@@ -41,20 +41,20 @@ fun URL.parseBoolean(key: String): Boolean = when (queryParameter(key).lowercase
     else -> false
 }
 
-fun currentSocks5(): URL? = if (!DataStore.serviceState.connected) {
+suspend fun localProxyURL(scheme: String): URL = Libcore.newURL(scheme).apply {
+    host = LOCALHOST4
+    ports = DataStore.mixedPort.get().toString()
+
+    DataStore.inboundUsername.get().emptyAsNull()?.let { name ->
+        username = name
+        password = DataStore.inboundPassword.get()
+    }
+}
+
+suspend fun currentSocks5(): URL? = if (!DataStore.serviceState.connected) {
     null
 } else {
-    Libcore.newURL("socks5").apply {
-        host = LOCALHOST4
-        ports = DataStore.mixedPort.getBlocking().toString()
-
-        // Avoid creating User field if not have.
-        val username = DataStore.inboundUsername.getBlocking()
-        if (username.isNotEmpty()) {
-            this.username = username
-            password = DataStore.inboundPassword.getBlocking()
-        }
-    }
+    localProxyURL("socks5")
 }
 
 fun String.isIpAddress(): Boolean {

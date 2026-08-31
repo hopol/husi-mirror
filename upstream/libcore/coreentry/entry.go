@@ -67,7 +67,7 @@ func Main(args []string) int {
 }
 
 func setupLogger() {
-	log.SetStdLogger(log.NewDefaultFactory(
+	factory := log.NewDefaultFactory(
 		context.Background(),
 		log.Formatter{
 			BaseTime:         time.Now(),
@@ -78,7 +78,9 @@ func setupLogger() {
 		"",
 		nil,
 		false,
-	).Logger())
+	)
+	common.Must(factory.Start())
+	log.SetStdLogger(factory.Logger())
 }
 
 func cArgs(argc C.int, argv **C.char) []string {
@@ -101,15 +103,16 @@ func cmdVersion() int {
 }
 
 func cmdRun(args []string) int {
-	fs := flag.NewFlagSet("run", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	workingDir := fs.String("dir", "", "working directory (default: platform-specific)")
-	socketPath := fs.String("socket", "", "gRPC socket or named pipe path (default: platform-specific)")
-	listenAddr := fs.String("listen", "", "TCP address for dev mode (optional; disables peer auth)")
-	if err := fs.Parse(args); err != nil {
+	flagSet := flag.NewFlagSet("run", flag.ContinueOnError)
+	flagSet.SetOutput(os.Stderr)
+	workingDir := flagSet.String("dir", "", "working directory (default: platform-specific)")
+	socketPath := flagSet.String("socket", "", "gRPC socket or named pipe path (default: platform-specific)")
+	listenAddr := flagSet.String("listen", "", "TCP address for dev mode (optional; disables peer auth)")
+	configPath := flagSet.String("config", "", "daemon config file (default: <dir>/daemon.json)")
+	if err := flagSet.Parse(args); err != nil {
 		return 2
 	}
-	if fs.NArg() != 0 {
+	if flagSet.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "run: unexpected arguments")
 		return 2
 	}
@@ -123,7 +126,8 @@ func cmdRun(args []string) int {
 		log.Error(E.Cause(err, "resolve working directory"))
 		return 1
 	}
-	if err := os.MkdirAll(absDir, 0o700); err != nil {
+	err = os.MkdirAll(absDir, 0o700)
+	if err != nil {
 		log.Error(E.Cause(err, "create working directory"))
 		return 1
 	}
@@ -131,14 +135,20 @@ func cmdRun(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	log.Info("starting daemon host dir=", absDir, " socket=", *socketPath, " listen=", *listenAddr)
+	cfgLog := *configPath
+	if cfgLog == "" {
+		cfgLog = daemonhost.DefaultConfigPath(absDir)
+	}
+	log.Info("starting daemon host dir=", absDir, " socket=", *socketPath, " listen=", *listenAddr, " config=", cfgLog)
 	host := daemonhost.NewDaemonHost(daemonhost.DaemonHostOptions{
 		WorkingDir: absDir,
 		SocketPath: *socketPath,
 		ListenAddr: *listenAddr,
+		ConfigPath: *configPath,
 		Version:    libcore.Version,
 	})
-	if err := host.Run(ctx); err != nil {
+	err = host.Run(ctx)
+	if err != nil {
 		log.Error(err)
 		return 1
 	}
@@ -146,14 +156,14 @@ func cmdRun(args []string) int {
 }
 
 func cmdSession(args []string) int {
-	fs := flag.NewFlagSet("session", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	workingDir := fs.String("dir", "", "working directory for the session (required)")
-	socketPath := fs.String("socket", "", "gRPC socket path (default: <dir>/api.sock)")
-	if err := fs.Parse(args); err != nil {
+	flagSet := flag.NewFlagSet("session", flag.ContinueOnError)
+	flagSet.SetOutput(os.Stderr)
+	workingDir := flagSet.String("dir", "", "working directory for the session (required)")
+	socketPath := flagSet.String("socket", "", "gRPC socket path (default: <dir>/api.sock)")
+	if err := flagSet.Parse(args); err != nil {
 		return 2
 	}
-	if fs.NArg() != 0 {
+	if flagSet.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "session: unexpected arguments")
 		return 2
 	}
@@ -182,7 +192,8 @@ func cmdSession(args []string) int {
 		SocketPath: sock,
 		Version:    libcore.Version,
 	})
-	if err := host.Run(ctx); err != nil {
+	err = host.Run(ctx)
+	if err != nil {
 		log.Error(err)
 		return 1
 	}
@@ -203,39 +214,44 @@ func cmdService(args []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
-	fs := flag.NewFlagSet("service", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	workingDir := fs.String("dir", "", "daemon working directory (default: platform-specific)")
-	purge := fs.Bool("purge", false, "on uninstall, also remove the working directory")
-	if err := fs.Parse(rest); err != nil {
+	flagSet := flag.NewFlagSet("service", flag.ContinueOnError)
+	flagSet.SetOutput(os.Stderr)
+	workingDir := flagSet.String("dir", "", "daemon working directory (default: platform-specific)")
+	purge := flagSet.Bool("purge", false, "on uninstall, also remove the working directory")
+	err = flagSet.Parse(rest)
+	if err != nil {
 		return 2
 	}
-	if fs.NArg() != 0 {
+	if flagSet.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "service: unexpected arguments")
 		return 2
 	}
 
 	switch verb {
 	case "install":
-		if err := daemonhost.ServiceInstall(*workingDir); err != nil {
+		err := daemonhost.ServiceInstall(*workingDir)
+		if err != nil {
 			log.Error(err)
 			return 1
 		}
 		return 0
 	case "uninstall":
-		if err := daemonhost.ServiceUninstall(*workingDir, *purge); err != nil {
+		err := daemonhost.ServiceUninstall(*workingDir, *purge)
+		if err != nil {
 			log.Error(err)
 			return 1
 		}
 		return 0
 	case "start":
-		if err := daemonhost.ServiceStart(); err != nil {
+		err := daemonhost.ServiceStart()
+		if err != nil {
 			log.Error(err)
 			return 1
 		}
 		return 0
 	case "stop":
-		if err := daemonhost.ServiceStop(); err != nil {
+		err := daemonhost.ServiceStop()
+		if err != nil {
 			log.Error(err)
 			return 1
 		}
@@ -266,7 +282,7 @@ func splitServiceArgs(args []string) (verb string, rest []string, err error) {
 		a := args[i]
 		if verbs[a] {
 			if verb != "" {
-				return "", nil, fmt.Errorf("service: multiple verbs")
+				return "", nil, E.New("service: multiple verbs")
 			}
 			verb = a
 			continue
@@ -283,7 +299,7 @@ func splitServiceArgs(args []string) (verb string, rest []string, err error) {
 		rest = append(rest, a)
 	}
 	if verb == "" {
-		return "", nil, fmt.Errorf("usage: husi-core service <install|uninstall|start|stop|status> …")
+		return "", nil, E.New("usage: husi-core service <install|uninstall|start|stop|status> …")
 	}
 	return verb, rest, nil
 }

@@ -57,6 +57,7 @@
     <string name="group_edit_subscription">Edit subscription</string>
     <string name="group_status_empty">Empty group</string>
     <string name="group_status_empty_subscription">Not updated yet</string>
+    <string name="group_status_updated_empty">Updated, but no server in it</string>
     <plurals name="group_status_proxies">
         <item quantity="one">%1$d Proxy</item>
         <item quantity="other">%1$d Proxies</item>
@@ -187,8 +188,8 @@
     <string name="route_asset_updated">Updated</string>
     <string name="route_global_asset_auto_update_delay">Rule asset update interval (In minutes)</string>
     <string name="route_asset_auto_update_delay">Asset update interval (In minutes)</string>
-    <string name="route_asset_auto_update_off">Auto update disabled</string>
-    <string name="route_asset_auto_update_on">Auto update every %1$d min</string>
+    <string name="auto_update_off">Auto update disabled</string>
+    <string name="auto_update_on">Auto update every %1$d min</string>
     <string name="route_opt_bypass_lan">Bypass LAN</string>
     <string name="route_opt_block_ads">Block ADs</string>
     <string name="route_opt_block_analysis">Block analysis</string>
@@ -280,6 +281,7 @@
     <string name="action_trusttunnel" translatable="false">TrustTunnel</string>
     <string name="action_urltest" translatable="false">URLTest</string>
     <string name="action_selector" translatable="false">Selector</string>
+    <string name="action_balancer" translatable="false">Balancer</string>
     <string name="proxy_chain">Proxy Chain</string>
     <string name="custom_config">Custom Config</string>
     <string name="balancer">Balancer</string>
@@ -659,6 +661,11 @@
     <string name="status_status">Status</string>
     <string name="status_proxy">Proxy</string>
     <string name="status_direct">Direct</string>
+    <string name="dashboard_edit_widgets">Edit dashboard</string>
+    <string name="dashboard_done_editing">Done editing</string>
+    <string name="dashboard_hidden_widgets">Hidden cards</string>
+    <string name="dashboard_hide_widget">Hide card</string>
+    <string name="dashboard_show_widget">Show card</string>
     <string name="disable_post_quantum">Disable post-quantum key agreement</string>
     <string name="mux_strategy">Mux Strategy</string>
     <string name="mux_number">Mux Number</string>
@@ -730,6 +737,7 @@
     <string name="proxy_set">Proxy Set</string>
     <string name="interrupt_exist_connections">Interrupt Exist Connections</string>
     <string name="urltest_interval">URLTest Interval</string>
+    <string name="rotate_interval">Rotate Interval</string>
     <string name="idle_timeout">IDLE Timeout</string>
     <string name="urltest_tolerance">Tolerance</string>
     <string name="expand">Expand</string>
@@ -755,6 +763,10 @@
     <string name="url" translatable="false">URL</string>
     <string name="route_asset_name">Asset Name</string>
     <string name="invalid_filename">Invalid filename</string>
+    <string name="filename_too_long_bytes">Filename takes %2$d bytes, but this platform allows %1$d</string>
+    <string name="filename_too_long_characters">Filename takes %2$d characters, but this platform allows %1$d</string>
+    <string name="path_too_long_bytes">File path takes %2$d bytes, but this platform allows %1$d</string>
+    <string name="path_too_long_characters">File path takes %2$d characters, but this platform allows %1$d</string>
     <string name="add_route_asset">Add Route Asset</string>
     <string name="assets_settings">Asset Settings</string>
     <string name="import_url">Import URL</string>

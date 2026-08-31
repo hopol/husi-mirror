@@ -24,6 +24,7 @@
     <string name="group_edit_subscription">编辑订阅</string>
     <string name="group_status_empty">空</string>
     <string name="group_status_empty_subscription">从未更新</string>
+    <string name="group_status_updated_empty">已更新，但没有节点</string>
     <plurals name="group_status_proxies">
         <item quantity="other">%1$d 个配置</item>
     </plurals>
@@ -282,8 +283,8 @@
     <string name="route_asset_status">本地版本: %1$s</string>
     <string name="route_global_asset_auto_update_delay">规则资源更新间隔 (分)</string>
     <string name="route_asset_auto_update_delay">单个资源更新间隔 (分)</string>
-    <string name="route_asset_auto_update_off">自动更新已关闭</string>
-    <string name="route_asset_auto_update_on">每 %1$d 分钟自动更新</string>
+    <string name="auto_update_off">自动更新已关闭</string>
+    <string name="auto_update_on">每 %1$d 分钟自动更新</string>
     <string name="route_rules_provider">路由资源更新源</string>
     <string name="route_assets">资源</string>
     <string name="route_manage_assets">管理路由资源</string>
@@ -581,6 +582,11 @@
     <string name="status_status">状态</string>
     <string name="status_proxy">代理</string>
     <string name="status_direct">直连</string>
+    <string name="dashboard_edit_widgets">编辑仪表板</string>
+    <string name="dashboard_done_editing">完成编辑</string>
+    <string name="dashboard_hidden_widgets">已隐藏的卡片</string>
+    <string name="dashboard_hide_widget">隐藏卡片</string>
+    <string name="dashboard_show_widget">显示卡片</string>
     <string name="disable_post_quantum">禁用后量子密钥协商</string>
     <string name="mux_strategy">多路复用策略</string>
     <string name="mux_number">多路复用数量</string>
@@ -668,6 +674,10 @@
     <string name="refresh">刷新</string>
     <string name="route_asset_name">资源名称</string>
     <string name="invalid_filename">无效文件名</string>
+    <string name="filename_too_long_bytes">文件名占 %2$d 字节，当前平台最多允许 %1$d 字节</string>
+    <string name="filename_too_long_characters">文件名占 %2$d 个字符，当前平台最多允许 %1$d 个字符</string>
+    <string name="path_too_long_bytes">文件路径占 %2$d 字节，当前平台最多允许 %1$d 字节</string>
+    <string name="path_too_long_characters">文件路径占 %2$d 个字符，当前平台最多允许 %1$d 个字符</string>
     <string name="add_route_asset">添加路由资源</string>
     <string name="assets_settings">资源设置</string>
     <string name="import_url">导入 URL</string>

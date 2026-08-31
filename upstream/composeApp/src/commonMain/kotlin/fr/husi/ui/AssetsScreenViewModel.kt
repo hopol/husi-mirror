@@ -52,7 +52,7 @@ internal data class AssetItem(
     val version: String,
     val builtIn: Boolean,
     val autoUpdateDelay: Int = 0,
-    val progress: Float? = null,
+    val isUpdating: Boolean = false,
 )
 
 @Immutable
@@ -79,7 +79,7 @@ internal class AssetsScreenViewModel(
     private lateinit var assetsDir: File
     private lateinit var geoDir: File
 
-    private var previousAssetNames = emptySet<String>()
+    private val firstDownloadStarted = mutableSetOf<String>()
     private var initializedFor: Pair<String, String>? = null
     private var assetsObserveJob: Job? = null
 
@@ -96,22 +96,24 @@ internal class AssetsScreenViewModel(
         if (initializedFor == args && assetsObserveJob?.isActive == true) return
         initializedFor = args
         assetsObserveJob?.cancel()
+        firstDownloadStarted.clear()
         this.assetsDir = assetsDir
         this.geoDir = geoDir
 
         assetsObserveJob = viewModelScope.launch {
             SagerDatabase.assetDao.getAll().collectLatest { assets ->
-                val currentNames = assets.map { it.name }.toSet()
-                val newAssets = currentNames - previousAssetNames
-
-                newAssets.forEach { name ->
-                    updateSingleAsset(geoDir.resolve(name))
+                for (asset in assets) {
+                    if (needsFirstDownload(asset) && firstDownloadStarted.add(asset.name)) {
+                        updateSingleAsset(geoDir.resolve(asset.name))
+                    }
                 }
-
-                previousAssetNames = currentNames
                 refreshAssets0(assets)
             }
         }
+    }
+
+    private fun needsFirstDownload(asset: AssetEntity): Boolean {
+        return asset.lastUpdated == 0L && !geoDir.resolve(asset.name).isFile
     }
 
     fun refreshAssets() = viewModelScope.launch {
@@ -161,7 +163,7 @@ internal class AssetsScreenViewModel(
             version = version,
             builtIn = builtIn,
             autoUpdateDelay = entity?.autoUpdateDelay ?: 0,
-            progress = null,
+            isUpdating = false,
         )
     }
 
@@ -237,33 +239,28 @@ internal class AssetsScreenViewModel(
     private suspend fun updateSingleAsset0(asset: File) {
         val entity = SagerDatabase.assetDao.get(asset.name) ?: return
 
+        setUpdating(asset, isUpdating = true)
+        try {
+            entity.version = updateSingleRouteAsset(entity, assetsDir)
+        } finally {
+            setUpdating(asset, isUpdating = false)
+        }
+        entity.lastUpdated = currentEpochSeconds()
+        SagerDatabase.assetDao.update(entity)
+    }
+
+    private fun setUpdating(asset: File, isUpdating: Boolean) {
         uiState.update { state ->
             state.copy(
                 assets = state.assets.map {
                     if (it.file == asset) {
-                        it.copy(progress = 0f)
+                        it.copy(isUpdating = isUpdating)
                     } else {
                         it
                     }
                 },
             )
         }
-
-        entity.version = updateSingleRouteAsset(entity, assetsDir) { progress ->
-            uiState.update { state ->
-                state.copy(
-                    assets = state.assets.map {
-                        if (it.file == asset) {
-                            it.copy(progress = progress)
-                        } else {
-                            it
-                        }
-                    },
-                )
-            }
-        }
-        entity.lastUpdated = currentEpochSeconds()
-        SagerDatabase.assetDao.update(entity)
     }
 
     fun undoableRemove(fileName: String) = viewModelScope.launch {

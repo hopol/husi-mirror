@@ -16,13 +16,14 @@ import fr.husi.bg.ServiceState
 import fr.husi.compose.theme.DEFAULT
 import fr.husi.database.preference.DataStorePreferenceDataStore
 import fr.husi.database.preference.boolean
-import fr.husi.database.preference.createConfigurationDataStore
 import fr.husi.database.preference.int
 import fr.husi.database.preference.long
 import fr.husi.database.preference.port
+import fr.husi.database.preference.preferenceStoreScope
 import fr.husi.database.preference.string
 import fr.husi.database.preference.stringSet
 import fr.husi.platform.PlatformInfo
+import fr.husi.repository.resolveRepository
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 
@@ -34,7 +35,9 @@ object DataStore {
     @Volatile
     var serviceState = ServiceState.Idle
 
-    val configurationStore = DataStorePreferenceDataStore.create(createConfigurationDataStore())
+    val configurationStore = DataStorePreferenceDataStore.create(
+        resolveRepository().createConfigurationDataStore(preferenceStoreScope()),
+    )
 
     init {
         // Migration
@@ -62,13 +65,20 @@ object DataStore {
     val currentProfile = configurationStore.long(Key.PROFILE_CURRENT)
 
     val selectedProxy = configurationStore.long(Key.PROFILE_ID)
-    val selectedGroup = configurationStore.long(Key.PROFILE_GROUP) {
-        ProfileManager.ensureDefaultGroupId()
-    }
+
+    /** No group use this ID */
+    const val GROUP_NOPE = -1L
+
+    /**
+     * The stored value is [GROUP_NOPE] until a group is picked. Resolving that to a
+     * real group can create the default group and is a database round trip, so it
+     * lives in [currentGroupId] / [currentGroup].
+     */
+    val selectedGroup = configurationStore.long(Key.PROFILE_GROUP)
 
     suspend fun currentGroupId(): Long {
         val currentSelected = selectedGroup.getOrNull()
-        if (currentSelected != null && currentSelected > 0L) return currentSelected
+        if (currentSelected != null && currentSelected > GROUP_NOPE) return currentSelected
         val groupId = ProfileManager.ensureDefaultGroupId()
         selectedGroup.set(groupId)
         return groupId
@@ -76,7 +86,7 @@ object DataStore {
 
     suspend fun currentGroup(): ProxyGroup {
         val currentSelected = selectedGroup.getOrNull()
-        if (currentSelected != null && currentSelected > 0L) {
+        if (currentSelected != null && currentSelected > GROUP_NOPE) {
             val group = SagerDatabase.groupDao.getById(currentSelected).firstOrNull()
             if (group != null) return group
         }
@@ -137,7 +147,10 @@ object DataStore {
     val domainStrategyForServer = configurationStore.string(Key.DOMAIN_STRATEGY_FOR_SERVER) {
         DOMAIN_STRATEGY_AUTO
     }
-    val enableFakeDns = configurationStore.boolean(Key.ENABLE_FAKE_DNS) { false }
+    // Using different outbound is a normal situation for proxy set.
+    // And the application may not refresh their DNS cache in time.
+    // So fake DNS is the best resolution. (With long-term practice by Clash and Surge.)
+    val enableFakeDns = configurationStore.boolean(Key.ENABLE_FAKE_DNS) { true }
     val fakeDNSForAll = configurationStore.boolean(Key.FAKE_DNS_FOR_ALL) { false }
 
     // https://developer.chrome.com/blog/local-network-access
@@ -209,6 +222,7 @@ object DataStore {
     val trafficSortMode = configurationStore.int(Key.TRAFFIC_SORT_MODE) { TrafficSortMode.START }
     val trafficConnectionQuery = configurationStore.int(Key.TRAFFIC_CONNECTION_QUERY) { 1 shl 0 }
     val proxySetOrder = configurationStore.int(Key.PROXY_SET_ORDER)
+    val dashboardWidgets = configurationStore.string(Key.DASHBOARD_WIDGETS)
 
     val speedTestUrl = configurationStore.string(Key.SPEED_TEST_URL) { SPEED_TEST_URL }
     val speedTestUploadURL = configurationStore.string(Key.SPEED_TEST_UPLOAD_URL) { SPEED_TEST_UPLOAD_URL }

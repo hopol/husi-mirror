@@ -347,6 +347,7 @@ kotlin {
                 implementation(libs.kotlinx.datetime)
 
                 implementation(libs.ini4j)
+                implementation(libs.okio)
                 implementation(libs.compose.preference)
                 implementation(libs.fastscroller.core)
                 implementation(libs.fastscroller.material3)
@@ -420,13 +421,20 @@ kotlin {
                     implementation("${desktopTarget.composeDependencyNotation}:$composeDesktopVersion")
                 }
                 implementation(libs.clikt)
+                implementation(libs.jna)
                 implementation(libs.kotlinx.coroutines.swing)
                 implementation(libs.nucleus.composetray)
                 implementation(libs.nucleus.core.runtime)
                 implementation(libs.nucleus.notification)
                 implementation(libs.nucleus.darkmode.detector)
                 implementation(libs.nucleus.autolaunch)
+                implementation(libs.nucleus.scheduler)
                 implementation(libcoreDesktopJarRequired)
+            }
+        }
+        getByName("desktopTest") {
+            dependencies {
+                implementation(libs.nucleus.scheduler.testing)
             }
         }
     }

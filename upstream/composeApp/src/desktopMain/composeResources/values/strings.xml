@@ -1,6 +1,9 @@
 <resources>
     <string name="auto_connect_desktop">Connect at Login</string>
     <string name="auto_connect_summary_desktop">Launch at login and connect automatically</string>
+    <string name="auto_connect_unsupported_desktop">Connect at login needs an installed package; it is unavailable in this build.</string>
+    <string name="auto_connect_blocked_desktop">Login items are blocked in system settings. Allow Husi there, then try again.</string>
+    <string name="auto_connect_failed_desktop">Could not update connect at login. See the logs for details.</string>
     <string name="tun_interface_name">Tun interface name</string>
     <string name="tun_interface_name_summary">Leave empty to use sing-box default</string>
     <string name="forced_search_process">Forced search process</string>
@@ -22,4 +25,5 @@
     <string name="daemon_takeover_message">This will disconnect %1$s\'s client. They will lose control of the running service.</string>
     <string name="daemon_takeover">Take over</string>
     <string name="daemon_stay_read_only">Stay read-only</string>
+    <string name="copy_terminal_proxy">Copy terminal proxy</string>
 </resources>

@@ -1,6 +1,6 @@
 ---
 name: husi-testing
-description: Husi project's Kotlin/Compose Multiplatform testing conventions. Use whenever adding, updating, or debugging tests under composeApp/ — ViewModels, updaters, ktx helpers, anything in commonTest/desktopTest. Also use when a piece of production code needs a DI seam to become testable (HTTP, DataStore, Libcore). Do not reach for mockk first or invent a new base class — consult this skill before writing the first test in a new file.
+description: Husi project's testing conventions. Use whenever adding, updating, or debugging tests under composeApp/ — ViewModels, updaters, ktx helpers, anything in commonTest/desktopTest. Also use when a piece of production code needs a DI seam to become testable (HTTP, DataStore, Libcore). Do not reach for mockk first or invent a new base class — consult this skill before writing the first test in a new file.
 ---
 
 # Husi Testing
@@ -198,6 +198,12 @@ Its file path is resolved through `resolveRepository().resolveDatabaseFile(...)`
 Koin to be initialised — that's why ViewModel/updater tests **must** go through `HusiKoinTest` or
 deeper, not `MainDispatcherTest` alone.
 
+The store's own coroutines (file reads, the write actor) run on `Repository.preferenceStoreDispatcher`
+— `Dispatchers.IO` in production, `Dispatchers.Unconfined` under `FakeRepository`, so suspending
+`PreferenceProxy.get()` / `set()` resumes on the calling thread and stays inside the test
+scheduler. Note the store is created once per process: whichever `Repository` is registered at the
+first `DataStore` touch supplies that dispatcher for the whole test run.
+
 Reset between tests:
 
 ```kotlin
@@ -208,6 +214,38 @@ override suspend fun postStartKoin() {
 
 `HusiHttpKoinTest` already does this. If you extend it, you don't have to reset again.
 
+### Never rely on a default value implicitly
+
+`reset()` restores the **defaults declared in `DataStore.kt`**, and those defaults are product
+decisions that get changed. A test that asserts on behaviour gated by a setting it never wrote is
+asserting on today's default, not on the behaviour it names — the next `chore:` commit that flips
+that default breaks the test somewhere far from the change.
+
+Set every setting your assertion depends on, even when the default already matches what you want:
+
+```kotlin
+@Test
+fun `buildConfig should migrate response-based proxy DNS rules to evaluate then respond`() = runBlocking {
+    disableFakeDns() // The rule shape under test only exists without fake DNS.
+    // …
+}
+```
+
+Guidelines:
+
+- Give the premise a **name** when several tests share it. `ConfigBuilderTest.disableFakeDns()`
+  pins `enableFakeDns` *and* `fakeDNSForAll` in one documented place, instead of six scattered
+  `set(false)` lines that each have to be found again when a third fake-DNS switch appears.
+- Pin what the assertion actually depends on, not the whole store. `ConfigBuilder` reads ~34
+  settings; pinning all of them in every test buys nothing and hides which one matters.
+- **Verify the dependency instead of guessing it.** Temporarily flip the candidate default in
+  `postStartKoin()` and run the class — the tests that fail are exactly the ones that were leaning
+  on it:
+
+  ```
+  ./gradlew :composeApp:desktopTest --tests fr.husi.fmt.ConfigBuilderTest 2>&1 | grep -E 'FAILED$'
+  ```
+
 For non-preference fields (e.g. `DataStore.serviceState`, which is `@Volatile var serviceState`),
 restore them yourself in `@AfterTest`.
 
@@ -215,6 +253,12 @@ restore them yourself in `@AfterTest`.
 
 - **Tests hang or `advanceUntilIdle()` does nothing.** You passed `runTest { ... }` without
   `dispatcher.scheduler`. Use `runTest(dispatcher.scheduler) { ... }`.
+- **`advanceUntilIdle()` returns while the work is still running.** It only drains the test
+  scheduler; work that resumes on a *real* dispatcher is invisible to it, so assertions run
+  mid-flight. `DataStore` used to do exactly this — `Repository.preferenceStoreDispatcher` now
+  keeps the preference store on the caller's thread under `FakeRepository` (see below). For any
+  other hop onto a real dispatcher, either inject the dispatcher (see "Refactoring for
+  testability") or have the function return its `Job` and `join()` it.
 - **`uiEvent.first()` returns immediately with the wrong event** (or never returns). You started
   collecting *after* the producer emitted, into a 0-replay `SharedFlow`. Wrap the collection in
   `backgroundScope.async { flow.first() }` *before* triggering the producer.
@@ -224,6 +268,10 @@ restore them yourself in `@AfterTest`.
 - **A test "passes" but only because production code silently swallowed the exception.** Inspect the
   `FakeHTTPClient` / `FakeHTTPRequest` recorders — `lastClient` being `null` is usually the
   smoking gun. Treat unread recorders as a smell.
+- **A test that never touched a setting starts failing after an unrelated `chore:` commit.** It was
+  asserting on a `DataStore` default. Pin the setting in the test (see "Never rely on a default
+  value implicitly") rather than rewriting the expectation to match the new default — the
+  expectation is usually still right for the scenario the test names.
 - **Tests pollute each other via `DataStore.serviceState` or other `var` globals.** Reset them in
   `@AfterTest`. The Koin / configurationStore lifecycle resets between tests automatically; loose
   vars do not.

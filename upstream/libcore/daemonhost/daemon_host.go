@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/daemon"
@@ -13,8 +14,10 @@ import (
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/service"
 
+	"github.com/xchacha20-poly1305/husi/libcore/v2"
 	"github.com/xchacha20-poly1305/husi/libcore/v2/coresvc"
 	"github.com/xchacha20-poly1305/husi/libcore/v2/distro"
+	"github.com/xchacha20-poly1305/husi/libcore/v2/externalapi"
 	"google.golang.org/grpc"
 )
 
@@ -25,6 +28,8 @@ type DaemonHostOptions struct {
 	SocketPath string
 	// ListenAddr is an optional TCP address for development only.
 	ListenAddr string
+	// ConfigPath is the daemon.json path. Empty uses DefaultConfigPath(WorkingDir).
+	ConfigPath string
 	// Version is reported by GetDaemonInfo / GetVersion.
 	Version string
 	// LogMaxLines is the started-service log ring size. Zero uses Host default.
@@ -55,6 +60,10 @@ func (h *DaemonHost) run(ctx context.Context) error {
 	if ctx == nil {
 		return E.New("missing context")
 	}
+	err := dropAmbientCapabilities()
+	if err != nil {
+		log.Warn(err)
+	}
 	workingDir := h.options.WorkingDir
 	if workingDir == "" {
 		workingDir = DefaultWorkingDir()
@@ -66,6 +75,25 @@ func (h *DaemonHost) run(ctx context.Context) error {
 	if err := os.MkdirAll(absDir, 0o700); err != nil {
 		return E.Cause(err, "create working directory")
 	}
+
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	hostCtx := daemonBaseContext(runCtx)
+
+	configPath := h.options.ConfigPath
+	if configPath == "" {
+		configPath = DefaultConfigPath(absDir)
+	}
+	configPath, err = filepath.Abs(configPath)
+	if err != nil {
+		return E.Cause(err, "resolve daemon config path")
+	}
+	cfg, err := LoadConfig(hostCtx, configPath)
+	if err != nil {
+		return err
+	}
+
 	coreDir, err := prepareCoreDirs(absDir)
 	if err != nil {
 		return err
@@ -79,16 +107,12 @@ func (h *DaemonHost) run(ctx context.Context) error {
 		version = "dev"
 	}
 
-	runCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
 	stuck := newStuckHostSignal(
 		cancel,
 		"core host is unusable, restarting the daemon",
 		"exiting so a working daemon can take over",
 	)
 
-	hostCtx := daemonBaseContext(runCtx)
 	holder := coresvc.NewInstanceContextHolder()
 	service.MustRegister[*coresvc.InstanceContextHolder](hostCtx, holder)
 
@@ -104,7 +128,8 @@ func (h *DaemonHost) run(ctx context.Context) error {
 	listenTCP := h.options.ListenAddr != ""
 	allowAll := listenTCP
 
-	if err := verifyOwnCorePairSignature(); err != nil {
+	err = verifyOwnCorePairSignature()
+	if err != nil {
 		return err
 	}
 
@@ -128,20 +153,20 @@ func (h *DaemonHost) run(ctx context.Context) error {
 	serverOptions = append(serverOptions, platformCreds...)
 
 	hostOpts := coresvc.HostOptions{
-		Context:       hostCtx,
-		Version:       version,
-		LogMaxLines:   h.options.LogMaxLines,
-		ServerOptions: serverOptions,
+		Context:          hostCtx,
+		Version:          version,
+		BuildEnvironment: libcore.BuildEnvironment(),
+		LogMaxLines:      h.options.LogMaxLines,
+		ServerOptions:    serverOptions,
 		// Skip default locale chain; we already installed locale+auth above.
 		SkipDefaultInterceptors: true,
 		OnStuck:                 stuck.report,
-		Backend: &pooledBackend{
-			workingDir: absDir,
+		Services: []coresvc.ServiceRegistrar{
 			// Same owner credential drop as StartService: plugins never run as
 			// the privileged daemon.
-			credential: daemonSvc.pluginCredentials,
+			newApplicationService(absDir, daemonSvc.pluginCredentials),
+			daemonSvc,
 		},
-		ExtraServices: daemonSvc,
 	}
 	host, err := coresvc.NewHost(hostOpts)
 	if err != nil {
@@ -164,17 +189,76 @@ func (h *DaemonHost) run(ctx context.Context) error {
 		return E.Cause(err, "start host")
 	}
 	log.Info("daemon host listening on ", listener.Addr())
+	if cfg != nil {
+		log.Info("loaded daemon config from ", configPath)
+	}
+
+	var apiOptions *externalapi.Options
+	if cfg != nil {
+		apiOptions = cfg.API
+	}
+	externalServer, externalGRPC, err := startExternalAPI(hostCtx, host, apiOptions)
+	if err != nil {
+		_ = host.Close()
+		_ = daemonSvc.plugins.Close()
+		return E.Cause(err, "start external api")
+	}
 
 	go h.attemptBootRestore(runCtx, daemonSvc)
 
 	<-runCtx.Done()
 	log.Info("daemon host shutting down")
 
+	closeExternalAPI(externalServer, externalGRPC)
+
 	daemonSvc.access.Lock()
 	_ = daemonSvc.stopLocked(false)
 	daemonSvc.access.Unlock()
 
 	return stuck.exitError(host.Close())
+}
+
+func startExternalAPI(ctx context.Context, host *coresvc.Host, api *externalapi.Options) (*externalapi.Server, *grpc.Server, error) {
+	if api == nil {
+		return nil, nil, nil
+	}
+	grpcServer := host.NewServiceServer(
+		grpc.ChainUnaryInterceptor(daemon.UnaryLocaleInterceptor, externalapi.UnaryAuthInterceptor(api.Secret)),
+		grpc.ChainStreamInterceptor(daemon.StreamLocaleInterceptor, externalapi.StreamAuthInterceptor(api.Secret)),
+	)
+	server, err := externalapi.New(ctx, log.StdLogger(), *api, grpcServer)
+	if err != nil {
+		grpcServer.Stop()
+		return nil, nil, err
+	}
+	err = server.Start()
+	if err != nil {
+		_ = server.Close()
+		grpcServer.Stop()
+		return nil, nil, err
+	}
+	log.Info("external api listening on ", server.Addr())
+	return server, grpcServer, nil
+}
+
+func closeExternalAPI(server *externalapi.Server, grpcServer *grpc.Server) {
+	if server != nil {
+		_ = server.Close()
+	}
+	if grpcServer == nil {
+		return
+	}
+	stopped := make(chan struct{})
+	go func() {
+		grpcServer.GracefulStop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(3 * time.Second):
+		grpcServer.Stop()
+		<-stopped
+	}
 }
 
 func verifyOwnCorePairSignature() error {

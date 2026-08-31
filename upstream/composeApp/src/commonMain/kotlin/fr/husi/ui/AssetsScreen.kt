@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -23,11 +22,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.DropdownMenuGroup
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.DropdownMenuPopup
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
@@ -52,19 +51,21 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.husi.RuleProvider
 import fr.husi.bg.RouteAssetUpdater
+import fr.husi.bg.createRouteGeoDir
 import fr.husi.bg.currentEpochSeconds
 import fr.husi.compose.BoxedVerticalScrollbar
-import fr.husi.compose.collectAsStateWithLifecycle
 import fr.husi.compose.CapsuleActionButton
 import fr.husi.compose.CapsuleTopBar
 import fr.husi.compose.SimpleIconButton
 import fr.husi.compose.TextButton
 import fr.husi.compose.UIntegerTextField
+import fr.husi.compose.collectAsStateWithLifecycle
 import fr.husi.compose.material3.Button
 import fr.husi.compose.material3.Icon
 import fr.husi.compose.material3.Text
@@ -78,6 +79,8 @@ import fr.husi.resources.Res
 import fr.husi.resources.action_import_file
 import fr.husi.resources.arrow_back
 import fr.husi.resources.assets_update
+import fr.husi.resources.auto_update_off
+import fr.husi.resources.auto_update_on
 import fr.husi.resources.back
 import fr.husi.resources.cancel
 import fr.husi.resources.delete
@@ -92,8 +95,6 @@ import fr.husi.resources.ok
 import fr.husi.resources.removed
 import fr.husi.resources.replay
 import fr.husi.resources.reset_rule_set
-import fr.husi.resources.route_asset_auto_update_off
-import fr.husi.resources.route_asset_auto_update_on
 import fr.husi.resources.route_asset_status
 import fr.husi.resources.route_assets
 import fr.husi.resources.route_global_asset_auto_update_delay
@@ -116,12 +117,6 @@ import kotlin.random.Random
 private const val ASSET_BUILT_IN = 0
 private const val ASSET_CUSTOM = 1
 
-private fun geoDir(assetsDir: File): File {
-    return File(assetsDir, "geo").apply {
-        mkdirs()
-    }
-}
-
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 internal fun AssetsScreen(
@@ -131,7 +126,7 @@ internal fun AssetsScreen(
 ) {
     val cacheDir = resolveRepository().cacheDir
     val assetsDir = resolveRepository().externalAssetsDir
-    val geoDir = remember { geoDir(assetsDir) }
+    val geoDir = remember { createRouteGeoDir(assetsDir) }
     val viewModel: AssetsScreenViewModel = viewModel { AssetsScreenViewModel(assetsDir, geoDir) }
     val scope = rememberCoroutineScope()
     val activeResultKeys = remember { mutableStateListOf<String>() }
@@ -280,7 +275,7 @@ internal fun AssetsScreen(
                     title = { Text(stringResource(Res.string.route_assets)) },
                     actions = {
                         val canOperate =
-                            uiState.process == null && uiState.assets.all { it.progress == null }
+                            uiState.process == null && uiState.assets.none { it.isUpdating }
                         val canReset = canOperate && rulesProvider == RuleProvider.OFFICIAL
 
                         CapsuleActionButton {
@@ -372,7 +367,7 @@ internal fun AssetsScreen(
             }
         },
 
-    ) { innerPadding ->
+        ) { innerPadding ->
         val listState = rememberLazyListState()
         val contentPadding = innerPadding.withNavigation()
         Row(modifier = Modifier.fillMaxSize()) {
@@ -415,18 +410,18 @@ internal fun AssetsScreen(
                             AssetCard(
                                 asset = asset,
                                 globalAutoUpdateDelay = routeAssetsAutoUpdateDelay,
-                                viewModel = viewModel,
-                                uiState = uiState,
+                                enabled = uiState.process == null,
                                 onEditAsset = { openAssetEditor(it) },
+                                onUpdateAsset = { viewModel.updateSingleAsset(it) },
                             )
                         }
                     } else {
                         AssetCard(
                             asset = asset,
                             globalAutoUpdateDelay = routeAssetsAutoUpdateDelay,
-                            viewModel = viewModel,
-                            uiState = uiState,
+                            enabled = uiState.process == null,
                             onEditAsset = { openAssetEditor(it) },
+                            onUpdateAsset = { viewModel.updateSingleAsset(it) },
                         )
                     }
                 }
@@ -474,9 +469,9 @@ internal fun AssetsScreen(
 private fun AssetCard(
     asset: AssetItem,
     globalAutoUpdateDelay: Int,
-    viewModel: AssetsScreenViewModel,
-    uiState: AssetsUiState,
+    enabled: Boolean,
     onEditAsset: (String) -> Unit,
+    onUpdateAsset: (File) -> Unit,
 ) {
     val autoUpdateDelay = if (asset.builtIn) {
         globalAutoUpdateDelay
@@ -492,14 +487,6 @@ private fun AssetCard(
                 .fillMaxWidth()
                 .padding(16.dp),
         ) {
-            asset.progress?.let {
-                LinearProgressIndicator(
-                    progress = { it },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-            Spacer(modifier = Modifier.height(12.dp))
-
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -508,12 +495,22 @@ private fun AssetCard(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    Text(
-                        text = asset.file.name,
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                        ),
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            text = asset.file.name,
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                            ),
+                        )
+                        if (asset.isUpdating) {
+                            CircularWavyProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                            )
+                        }
+                    }
                     Spacer(modifier = Modifier.weight(1f))
                     Text(
                         text = stringResource(
@@ -524,7 +521,11 @@ private fun AssetCard(
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     Text(
-                        text = routeAssetAutoUpdateSummary(autoUpdateDelay),
+                        text = if (autoUpdateDelay > 0) {
+                            stringResource(Res.string.auto_update_on, autoUpdateDelay)
+                        } else {
+                            stringResource(Res.string.auto_update_off)
+                        },
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodyMedium,
                     )
@@ -536,7 +537,7 @@ private fun AssetCard(
                         horizontalAlignment = Alignment.End,
                         verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
-                        val clickable = uiState.process == null && asset.progress == null
+                        val clickable = enabled && !asset.isUpdating
                         CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
                             Box(modifier = Modifier.size(36.dp)) {
                                 SimpleIconButton(
@@ -551,7 +552,7 @@ private fun AssetCard(
                         }
                         Button(
                             onClick = {
-                                viewModel.updateSingleAsset(asset.file)
+                                onUpdateAsset(asset.file)
                             },
                             enabled = clickable,
                             contentPadding = PaddingValues(
@@ -569,11 +570,39 @@ private fun AssetCard(
     }
 }
 
+@Preview
 @Composable
-private fun routeAssetAutoUpdateSummary(autoUpdateDelay: Int): String {
-    return if (autoUpdateDelay <= 0) {
-        stringResource(Res.string.route_asset_auto_update_off)
-    } else {
-        stringResource(Res.string.route_asset_auto_update_on, autoUpdateDelay)
+private fun PreviewAssetCards() {
+    PreviewContainer {
+        val geoDir = remember { createRouteGeoDir(resolveRepository().externalAssetsDir) }
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            AssetCard(
+                asset = AssetItem(
+                    file = geoDir.resolve("geoip.db"),
+                    version = "20260828",
+                    builtIn = true,
+                ),
+                globalAutoUpdateDelay = 0,
+                enabled = true,
+                onEditAsset = {},
+                onUpdateAsset = {},
+            )
+            AssetCard(
+                asset = AssetItem(
+                    file = geoDir.resolve("geosite.db"),
+                    version = "20260828",
+                    builtIn = true,
+                    autoUpdateDelay = 0,
+                    isUpdating = true,
+                ),
+                globalAutoUpdateDelay = 4400,
+                enabled = true,
+                onEditAsset = {},
+                onUpdateAsset = {},
+            )
+        }
     }
 }

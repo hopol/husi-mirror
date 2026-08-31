@@ -10,9 +10,10 @@ import kotlinx.serialization.Serializable as KxsSerializable
 import kotlinx.serialization.json.JsonElement
 
 object SingBoxOptions {
-    // Generate on line +439
+    // Generate on line +446
 
     const val RULE_SET_TAG_PLACEHOLDER = "{tag}"
+    const val RULE_SET_FILE_SUFFIX = ".srs"
 
     const val NetworkTCP = "tcp"
     const val NetworkUDP = "udp"
@@ -48,6 +49,7 @@ object SingBoxOptions {
     const val TYPE_NAIVE = "naive"
     const val TYPE_TRUST_TUNNEL = "trusttunnel"
     const val TYPE_BRIDGE = "bridge"
+    const val TYPE_BALANCER = "balancer"
 
     const val TYPE_PROTECT = "protect"
     const val TYPE_ANCHOR = "anchor"
@@ -4990,6 +4992,17 @@ object SingBoxOptions {
 
         @JvmField
         var iproute2_rule_index: Int? = null
+
+    }
+
+    @KxsSerializable
+    open class Outbound_BalancerOptions : Outbound() {
+
+        @JvmField
+        var outbounds: MutableList<String>? = null
+
+        @JvmField
+        var interval: String? = null
 
     }
 
