@@ -48,8 +48,6 @@
     <string name="inbound_settings">傳入設定</string>
     <string name="general_settings">應用程式設定</string>
     <string name="cag_ws">WebSocket 設定</string>
-    <string name="ws_browser_forwarding">瀏覽器轉發</string>
-    <string name="ws_browser_forwarding_sum">轉傳對應的 WebSocket 連線至瀏覽器。</string>
     <string name="speed_interval">速度通知更新間隔</string>
     <string name="traffic">%1$s↑ %2$s↓</string>
     <string name="speed_detail">代理： %1$s↑ %2$s↓\n直連： %3$s↑ %4$s↓</string>
@@ -476,6 +474,24 @@
     <string name="fakedns_message">在代理停止後，可能會導致其他應用程式需要重新啟動，才能重新連線到網路</string>
     <string name="mux_sum">Mux 的設計目的是減少連線握手延遲，而不是增加連線吞吐量。使用 Mux 觀看影片、下載或測試速度通常會適得其反。如果伺服器不支援它，你將無法連接到網際網路。</string>
     <string name="nat_result_hint">NAT 測試結果</string>
+    <string name="nat_unknown">未知</string>
+    <string name="nat_endpoint_independent">端點無關</string>
+    <string name="nat_address_dependent">位址相關</string>
+    <string name="nat_address_and_port_dependent">位址和連接埠相關</string>
+    <string name="network_quality_test">網路品質</string>
+    <string name="network_quality_test_summary">使用 Apple 的 networkQuality 協定測量下載和上傳容量以及回應能力（RPM）。</string>
+    <string name="network_quality_config_url">配置 URL</string>
+    <string name="network_quality_serial">依序測量下載和上傳</string>
+    <string name="network_quality_max_runtime">最長執行時間（秒）</string>
+    <string name="network_quality_http3">使用 HTTP/3</string>
+    <string name="download_capacity">下載容量</string>
+    <string name="upload_capacity">上傳容量</string>
+    <string name="download_responsiveness">下載回應能力</string>
+    <string name="upload_responsiveness">上傳回應能力</string>
+    <string name="idle_latency">閒置延遲</string>
+    <string name="elapsed_time">已用時間</string>
+    <string name="responsiveness_rpm">%1$s RPM</string>
+    <string name="outbound_default">預設</string>
     <string name="tuic_reduce_rtt">啟用 0-RTT QUIC 握手</string>
     <string name="neko_plugin_internal_error">%1$s 內部錯誤</string>
     <string name="move">移動</string>
@@ -511,6 +527,7 @@
     <string name="ntp_sync_interval">NTP 同步間隔</string>
     <string name="by_source">根據原</string>
     <string name="by_upload">根據上行</string>
+    <string name="by_upload_speed">根據上行速度</string>
     <string name="have_reset_network">所有網路均已重置</string>
     <string name="start_time">開始於</string>
     <string name="outbound_rule">出站規則</string>
@@ -522,12 +539,15 @@
     <string name="sort_mode">排序方式</string>
     <string name="by_time">根據時間</string>
     <string name="by_download">根據下行</string>
+    <string name="by_download_speed">根據下行速度</string>
     <string name="pinned_peer_certificate_chain_sha256">固定憑證鏈哈希</string>
     <string name="ensure_close_all">您確定要關閉 %1$s 連線嗎？</string>
     <string name="destination_address">目標地址</string>
     <string name="by_inbound">根據入站</string>
     <string name="by_matched_rule">根據命中規則</string>
     <string name="upload">上傳</string>
+    <string name="upload_speed">上傳速度</string>
+    <string name="download_speed">下載速度</string>
     <string name="by_destination">根據目標</string>
     <string name="inbound">入站</string>
     <string name="ip_version">IP 版本</string>
@@ -535,7 +555,6 @@
     <string name="chain">鏈</string>
     <string name="close">關閉</string>
     <string name="custom_rule_provider">自定義規則提供者</string>
-    <string name="speed_test">測速</string>
     <string name="client_type">客戶端型別</string>
     <string name="traffic_status">狀態</string>
     <string name="traffic_connections">連接</string>
@@ -654,7 +673,6 @@
     <string name="connection_status">連線狀態</string>
     <string name="connection_status_active">活躍中</string>
     <string name="connection_status_closed">已關閉</string>
-    <string name="upload_size">上傳大小</string>
     <string name="can_not_be_empty">不可為空</string>
     <string name="juicity_provider">Juicity 提供程式</string>
     <plurals name="delete_confirm_detail">
@@ -697,5 +715,4 @@
     <string name="ipv4" translatable="false">IPv4</string>
     <string name="ipv6" translatable="false">IPv6</string>
     <string name="connected_since">連線時間</string>
-
 </resources>

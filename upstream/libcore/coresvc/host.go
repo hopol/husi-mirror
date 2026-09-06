@@ -15,7 +15,6 @@ import (
 	"github.com/sagernet/sing-box/daemon"
 	"github.com/sagernet/sing-box/log"
 	E "github.com/sagernet/sing/common/exceptions"
-	"github.com/sagernet/sing/service"
 
 	"github.com/xchacha20-poly1305/husi/libcore/v2/pb/husi/v1"
 	"google.golang.org/grpc"
@@ -34,7 +33,6 @@ type Host struct {
 	appHandler       AppHandler
 
 	started *daemon.StartedService
-	holder  *InstanceContextHolder
 	events  *eventBroadcaster
 
 	services      []ServiceRegistrar
@@ -81,11 +79,6 @@ func NewHost(options HostOptions) (*Host, error) {
 		return nil, E.New("missing context")
 	}
 	logMaxLines := max(options.LogMaxLines, 50)
-	holder := service.FromContext[*InstanceContextHolder](options.Context)
-	if holder == nil {
-		holder = NewInstanceContextHolder()
-		service.MustRegister[*InstanceContextHolder](options.Context, holder)
-	}
 	started := daemon.NewStartedService(daemon.ServiceOptions{
 		Context:     options.Context,
 		Handler:     platformHandler{},
@@ -98,7 +91,6 @@ func NewHost(options HostOptions) (*Host, error) {
 		logMaxLines:             logMaxLines,
 		appHandler:              options.AppHandler,
 		started:                 started,
-		holder:                  holder,
 		events:                  newEventBroadcaster(),
 		services:                options.Services,
 		fileLogSink:             options.FileLogSink,
@@ -120,10 +112,6 @@ func (h *Host) PublishServiceEvent(event *husiv1.SubscribeServiceEventsResponse)
 
 func (h *Host) Started() *daemon.StartedService {
 	return h.started
-}
-
-func (h *Host) Holder() *InstanceContextHolder {
-	return h.holder
 }
 
 func (h *Host) SetAppHandler(handler AppHandler) {
@@ -297,6 +285,7 @@ func (h *Host) closeServiceWithWatchdog(closeFn func() error, timeout time.Durat
 	err := closeWithWatchdog(closeFn, timeout)
 	if errors.Is(err, ErrCloseTimeout) {
 		h.markStuck(err)
+		return err
 	}
 	return err
 }
@@ -327,8 +316,10 @@ func closeWithWatchdog(closeFn func() error, timeout time.Duration) error {
 	}
 }
 
+// InstanceContext returns the context of the running instance, falling back to
+// the host context while there is none.
 func (h *Host) InstanceContext() context.Context {
-	return cmp.Or[context.Context](h.holder.Get(), h.ctx)
+	return cmp.Or[context.Context](h.liveInstanceContext(), h.ctx)
 }
 
 func (h *Host) Close() error {

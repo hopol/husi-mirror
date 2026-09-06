@@ -1,5 +1,5 @@
-commit=16c211d53ee0c852f311a8cf6d4a96b6f7a964fb
-timestamp=2026-09-01T07:10:48Z
+commit=0e5b59a922bcd2e2a9315ccdca6038a28bec152a
+timestamp=2026-09-06T06:48:08Z
 upstream_url=https://github.com/xchacha20-poly1305/husi
 upstream_branch=dev
-version=2.0.7
+version=2.1.0-alpha.0

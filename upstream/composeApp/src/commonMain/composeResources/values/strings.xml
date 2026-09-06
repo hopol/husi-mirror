@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">husi</string>
+    <string name="app_name">Husi</string>
     <string name="project">Project</string>
     <string name="github">Source code</string>
     <string name="telegram">Telegram update channel</string>
@@ -89,8 +89,6 @@
     <string name="general_settings">App Settings</string>
     <string name="cag_ws">WebSocket Settings</string>
     <string name="ws_max_early_data" translatable="false">Max early data</string>
-    <string name="ws_browser_forwarding">Browser Forwarding</string>
-    <string name="ws_browser_forwarding_sum">Forward corresponding WebSockets through the browser.</string>
     <string name="speed_interval">Speed Notification Update Interval</string>
     <string name="cag_misc">Misc Settings</string>
     <string name="show_stop">Show Stop Button</string>
@@ -101,6 +99,7 @@
     <string name="allow_insecure">Allow Insecure</string>
     <string name="allow_insecure_sum">Disable certificate checking. When enabled, this configuration is as secure as plaintext</string>
     <string name="traffic" translatable="false">%1$s↑ %2$s↓</string>
+    <string name="connection_speed" translatable="false">%1$s/s↑ %2$s/s↓</string>
     <string name="speed_detail">Proxy： %1$s↑ %2$s↓\nDirect： %3$s↑ %4$s↓</string>
     <string name="speed">%1$s/s</string>
     <string name="connection_test_testing">Testing…</string>
@@ -528,6 +527,24 @@
     <string name="nat_filtering">NAT Filtering</string>
     <string name="nat_type_detection">NAT Type Detection</string>
     <string name="nat_type_not_supported">Not supported by the server</string>
+    <string name="nat_unknown">Unknown</string>
+    <string name="nat_endpoint_independent">Endpoint Independent</string>
+    <string name="nat_address_dependent">Address Dependent</string>
+    <string name="nat_address_and_port_dependent">Address and Port Dependent</string>
+    <string name="network_quality_test">Network quality</string>
+    <string name="network_quality_test_summary">Measure download and upload capacity and responsiveness (RPM) with Apple\'s networkQuality protocol.</string>
+    <string name="network_quality_config_url">Config URL</string>
+    <string name="network_quality_serial">Measure download and upload one after the other</string>
+    <string name="network_quality_max_runtime">Max runtime (s)</string>
+    <string name="network_quality_http3">Use HTTP/3</string>
+    <string name="download_capacity">Download capacity</string>
+    <string name="upload_capacity">Upload capacity</string>
+    <string name="download_responsiveness">Download responsiveness</string>
+    <string name="upload_responsiveness">Upload responsiveness</string>
+    <string name="idle_latency">Idle latency</string>
+    <string name="elapsed_time">Elapsed</string>
+    <string name="responsiveness_rpm">%1$s RPM</string>
+    <string name="outbound_default">Default</string>
     <string name="tools_network">Network</string>
     <string name="mtu" translatable="false">MTU</string>
     <string name="backup">Backup</string>
@@ -633,10 +650,14 @@
     <string name="by_destination">By Destination</string>
     <string name="by_upload">By Upload</string>
     <string name="by_download">By Download</string>
+    <string name="by_upload_speed">By Upload Speed</string>
+    <string name="by_download_speed">By Download Speed</string>
     <string name="pinned_peer_certificate_chain_sha256">Pinned certificate chain hash</string>
     <string name="by_inbound">By Inbound</string>
     <string name="by_matched_rule">By Matched Rule</string>
     <string name="upload">Upload</string>
+    <string name="upload_speed">Upload Speed</string>
+    <string name="download_speed">Download Speed</string>
     <string name="inbound">Inbound</string>
     <string name="ip_version">IP Version</string>
     <string name="outbound">Outbound</string>
@@ -646,7 +667,6 @@
     <string name="edns_client_subnet" translatable="false">EDNS Client Subnet</string>
     <string name="have_reset_network">All network have been reset</string>
     <string name="ensure_close_all">Are you sure to close %1$s connections?</string>
-    <string name="speed_test">Speed Test</string>
     <string name="padding">Padding</string>
     <string name="custom_rule_provider">Custom Rule Provider</string>
     <string name="client_type">Client Type</string>
@@ -781,7 +801,6 @@
     <string name="connection_status">Connection Status</string>
     <string name="connection_status_active">Active</string>
     <string name="connection_status_closed">Closed</string>
-    <string name="upload_size">Upload Size</string>
     <string name="can_not_be_empty">Cann\'t be empty</string>
     <string name="juicity_provider">Juicity Provider</string>
     <plurals name="delete_confirm_detail">

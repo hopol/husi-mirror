@@ -217,9 +217,9 @@ func (w *boxPlatformInterfaceWrapper) FindConnectionOwner(request *adapter.FindC
 		return nil, err
 	}
 	return &adapter.ConnectionOwner{
-		UserId:              result.UserId,
-		AndroidPackageNames: result.androidPackageNames,
-		// ProcessPath: result.ProcessPath, // Not available in Android
+		UserId:       result.UserId,
+		PackageNames: result.androidPackageNames,
+		// ProcessPaths: not available in Android.
 	}, nil
 }
 
@@ -311,4 +311,12 @@ func (w *boxPlatformInterfaceWrapper) ReadSystemSSHHostKey() ([]byte, error) {
 
 func (w *boxPlatformInterfaceWrapper) TailscaleHostname() string {
 	return ""
+}
+
+func (w *boxPlatformInterfaceWrapper) UsePlatformAutoRedirect() bool {
+	return false
+}
+
+func (w *boxPlatformInterfaceWrapper) CreateAutoRedirect(options adapter.AutoRedirectOptions) (adapter.AutoRedirectSession, error) {
+	return nil, os.ErrInvalid
 }

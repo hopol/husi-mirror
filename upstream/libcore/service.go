@@ -2,10 +2,10 @@ package libcore
 
 import (
 	"sync"
+	"time"
 
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing/common"
-	"github.com/sagernet/sing/service"
 
 	"github.com/xchacha20-poly1305/husi/libcore/v2/coresvc"
 	"github.com/xchacha20-poly1305/husi/libcore/v2/pb/husi/v1"
@@ -24,6 +24,7 @@ type Service struct {
 	// pluginWorkingDir is the parent directory for transient URL-test plugin
 	// pools and (on Android) the long-lived StartService plugin pool.
 	pluginWorkingDir string
+	deviceSleptAt    time.Time
 }
 
 func (s *Service) SetPluginWorkingDir(dir string) {
@@ -35,8 +36,6 @@ func (s *Service) SetPluginWorkingDir(dir string) {
 func (s *Service) buildHost() (*coresvc.Host, error) {
 	ctx := baseContext(s.platformInterface)
 	registerPlatformInterface(ctx, s.platformInterface, false)
-	holder := coresvc.NewInstanceContextHolder()
-	service.MustRegister[*coresvc.InstanceContextHolder](ctx, holder)
 
 	application := NewApplicationService(s.platformInterface, servicePluginLauncher{service: s})
 	opts := coresvc.HostOptions{

@@ -49,7 +49,6 @@ import fr.husi.fmt.internal.buildSingBoxOutboundProxySetBean
 import fr.husi.fmt.internal.resolveMembers
 import fr.husi.fmt.juicity.JuicityBean
 import fr.husi.fmt.juicity.buildSingBoxOutboundJuicityBean
-import fr.husi.fmt.mieru.MieruBean
 import fr.husi.fmt.naive.NaiveBean
 import fr.husi.fmt.naive.buildSingBoxOutboundNaiveBean
 import fr.husi.fmt.openconnect.OpenConnectBean
@@ -223,7 +222,7 @@ suspend fun buildConfig(
             if (previousTarget != null && previousTarget != link.to) {
                 error(
                     "Conflicting proxy continuation: ${link.from.describe()} -> " +
-                            "${previousTarget.describe()} and ${link.to.describe()}",
+                        "${previousTarget.describe()} and ${link.to.describe()}",
                 )
             }
             links.add(link)
@@ -277,6 +276,37 @@ suspend fun buildConfig(
         )
     }
 
+    fun ResolvedChain.alwaysReferencedKeys(): Set<ChainEntryKey> {
+        val continuations = links.groupBy({ it.from }, { it.to })
+
+        fun reachableFrom(start: ChainEntryKey): Set<ChainEntryKey> {
+            val reached = LinkedHashSet<ChainEntryKey>()
+            val pending = ArrayDeque(listOf(start))
+            while (pending.isNotEmpty()) {
+                val key = pending.removeFirst()
+                if (!reached.add(key)) continue
+                pending += continuations[key].orEmpty()
+                pending += proxySetMembers[key].orEmpty().map { it.key }
+            }
+            return reached
+        }
+
+        val referenced = LinkedHashSet<ChainEntryKey>()
+        val pending = ArrayDeque(listOfNotNull(root?.key))
+        while (pending.isNotEmpty()) {
+            val key = pending.removeFirst()
+            if (!referenced.add(key)) continue
+            pending += continuations[key].orEmpty()
+            val members = proxySetMembers[key].orEmpty()
+            if (members.isNotEmpty()) {
+                pending += members
+                    .map { reachableFrom(it.key) }
+                    .reduce { shared, memberKeys -> shared intersect memberKeys }
+            }
+        }
+        return referenced
+    }
+
     val resolvingReferences = LinkedHashSet<Long>()
 
     fun List<Long>.requireNoDuplicateReferences(container: String) {
@@ -304,7 +334,7 @@ suspend fun buildConfig(
                     if (missingProxyIds.isNotEmpty()) {
                         error(
                             "Missing proxy reference in chain $id: " +
-                                    missingProxyIds.joinToString(", "),
+                                missingProxyIds.joinToString(", "),
                         )
                     }
                     val resolved = mergeResolvedChains(
@@ -663,6 +693,7 @@ suspend fun buildConfig(
             }
 
             val entriesWithContinuation = resolvedChain.links.mapTo(HashSet()) { it.from }
+            val alwaysReferenced = resolvedChain.alwaysReferencedKeys()
 
             fun addDNSDirectForce(bean: AbstractBean) {
                 if (bean is ChainBean || bean is ProxySetBean) return
@@ -805,6 +836,10 @@ suspend fun buildConfig(
                         }.asKxsMap()
                     }
 
+                    if (isEndpoint(this["type"].toString()) && entry.key !in alwaysReferenced) {
+                        this["on_demand"] = true
+                    }
+
                     // custom JSON merge
                     bean.customOutboundJson.blankAsNull()?.toJsonMapKxs()?.let {
                         mergeJson(it, currentOutbound)
@@ -818,22 +853,15 @@ suspend fun buildConfig(
                 tagToID[tagOut] = proxyEntity.id
                 outboundsByTag[tagOut] = currentOutbound
 
-                // External proxy need a direct inbound to forward the traffic
-                // For external proxy software, their traffic must goes to sing-box to use protected fd.
                 bean.finalAddress = bean.serverAddress
                 bean.finalPort = bean.serverPort
                 var currentInboundTag: String? = null
                 if (bean.canMapping && proxyEntity.needExternal()) {
-                    // no chain rule and not outbound, so need to set to direct
                     val needDirectRoute = entry.key !in entriesWithContinuation
-                    // mieru protects all its dialers via MIERU_PROTECT_PATH since v3.21.0
-                    // (enfein/mieru@666beec), so when it is the first hop it can connect to
-                    // the server by itself. Desktop TUN has no protect mechanism and the test
-                    // instance relies on the mapping for isolation, keep the mapping there.
-                    val canDialDirect = bean is MieruBean &&
-                            needDirectRoute &&
-                            !forTest &&
-                            (PlatformInfo.isAndroid || !isVPN)
+                    val canDialDirect = bean.canSelfProtect // Plugin support protect.
+                        && needDirectRoute // on direct out
+                        && !forTest // When testing, there may no protect service.
+                        && (PlatformInfo.isAndroid || !isVPN) // Only Android support protect path, only VPN need protect.
                     if (!canDialDirect) {
                         val mappingPort = mkPort()
                         bean.finalAddress = LOCALHOST4
@@ -1505,6 +1533,7 @@ suspend fun buildConfig(
             )
 
             // VPN with server-push DNS
+            // What if a endpoint on demand while using this DNS? This may be a bug, change it until user noticing it.
             for ((endpointTag, dnsType) in vpnWithPushDNS) {
                 val dnsTag = "dns-${endpointTag}"
                 val server = when (dnsType) {

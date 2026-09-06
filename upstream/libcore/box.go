@@ -28,11 +28,10 @@ type boxInstance struct {
 
 	platformInterface PlatformInterface
 	urlTestHistory    *urltest.HistoryStorage
-	pauseManager      pause.Manager
 }
 
 // newBoxInstance creates a boxInstance. forTest must be true for the surviving
-// StandaloneURLTest path (no platform log writer, no combinedapi assertion).
+// StandaloneURLTest path (no platform log writer).
 func newBoxInstance(config string, platformInterface PlatformInterface, forTest bool) (b *boxInstance, err error) {
 	defer catchPanic("NewSingBoxInstance", func(panicErr error) { err = panicErr })
 
@@ -70,7 +69,6 @@ func newBoxInstance(config string, platformInterface PlatformInterface, forTest 
 		forTest:           forTest,
 		cancel:            cancel,
 		platformInterface: platformInterface,
-		pauseManager:      service.FromContext[pause.Manager](ctx),
 		urlTestHistory:    service.PtrFromContext[urltest.HistoryStorage](ctx),
 	}
 	return b, nil
