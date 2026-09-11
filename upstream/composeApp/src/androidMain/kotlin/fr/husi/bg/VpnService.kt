@@ -10,7 +10,6 @@ import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.os.PowerManager
 import androidx.core.content.ContextCompat
-import fr.husi.ExpectedException
 import fr.husi.Key
 import fr.husi.database.DataStore
 import fr.husi.fmt.LOCALHOST4
@@ -103,8 +102,7 @@ class VpnService : BaseVpnService(),
         runBlocking { VpnRequestNotification.show(this@VpnService) }
     }
 
-    inner class NullConnectionException : NullPointerException(),
-        ExpectedException {
+    inner class NullConnectionException : NullPointerException() {
         override fun getLocalizedMessage() = runBlocking {
             resolveRepository().getString(Res.string.reboot_required)
         }
@@ -206,8 +204,7 @@ class VpnService : BaseVpnService(),
         val packageName = packageName
         val proxyApps = DataStore.proxyApps.getBlocking()
         var bypass = DataStore.bypassMode.getBlocking()
-        val workaroundSYSTEM = false /* DataStore.tunImplementation == TunImplementation.SYSTEM */
-        val needBypassRootUid = workaroundSYSTEM || data.proxy!!.config.trafficProfiles.any {
+        val needBypassRootUid = data.proxy!!.config.trafficProfiles.any {
             it.hysteriaBean?.protocol == HysteriaBean.PROTOCOL_FAKETCP
         }
 

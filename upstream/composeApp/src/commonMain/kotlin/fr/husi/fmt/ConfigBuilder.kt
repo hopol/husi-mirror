@@ -4,7 +4,7 @@ import fr.husi.DOMAIN_STRATEGY_AUTO
 import fr.husi.Key
 import fr.husi.NetworkInterfaceStrategy
 import fr.husi.RuleProvider
-import fr.husi.TunImplementation
+import fr.husi.TunIpStack
 import fr.husi.bg.VpnConstants
 import fr.husi.bg.routeGeoDir
 import fr.husi.database.DataStore
@@ -116,6 +116,9 @@ const val TAG_DNS_MDNS = "dns-mdns"
 // Service
 const val TAG_SERVICE_ANCHOR = "service-anchor"
 const val TAG_SERVICE_PROTECT = "service-protect"
+
+// HTTP client
+const val TAG_HTTP_CLIENT_DEFAULT = "http-default"
 
 const val LOCALHOST4 = "127.0.0.1"
 const val LOCALHOST_NAME = "localhost"
@@ -558,10 +561,11 @@ suspend fun buildConfig(
                 Inbound_TunOptions().apply {
                     type = SingBoxOptions.TYPE_TUN
                     tag = TAG_TUN
-                    stack = when (DataStore.tunImplementation.get()) {
-                        TunImplementation.GVISOR -> "gvisor"
-                        TunImplementation.SYSTEM -> "system"
-                        else -> "mixed"
+                    stack = when (DataStore.tunIpStack.get()) {
+                        TunIpStack.GVISOR -> "gvisor"
+                        TunIpStack.SYSTEM -> "system"
+                        TunIpStack.MIXED -> "mixed"
+                        else -> "go"
                     }
                     mtu = DataStore.mtu.get()
                     // Hijack intercepts port 53 at the TUN layer and calls
@@ -1620,6 +1624,16 @@ suspend fun buildConfig(
         }
         route!!.final_ = mainTag
         if (!forTest) dns!!.final_ = TAG_DNS_REMOTE
+
+        if (forExport) {
+            http_clients = mutableListOf(
+                SingBoxOptions.HTTPClient().apply {
+                    tag = TAG_HTTP_CLIENT_DEFAULT
+                    detour = mainTag
+                },
+            )
+            route!!.default_http_client = TAG_HTTP_CLIENT_DEFAULT
+        }
 
         // mapping for plugin
         for ((serverInfo, inboundTags) in mappingOverride) {

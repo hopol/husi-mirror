@@ -112,12 +112,13 @@ object Key {
 
     const val ACQUIRE_WAKE_LOCK = "acquireWakeLock"
 
-    const val TUN_IMPLEMENTATION = "tunImplementation"
+    const val TUN_IP_STACK = "tunIpStack"
     const val PROFILE_TRAFFIC_STATISTICS = "profileTrafficStatistics"
 
     const val CERT_PROVIDER = "certProvider"
     const val DISABLE_PROCESS_TEXT = "disableProcessText"
     const val HIDE_LAUNCHER_ICON = "hideLauncherIcon"
+    const val ENABLE_TASKER = "enableTasker"
 
     const val TRAFFIC_DESCENDING = "trafficDescending"
     const val TRAFFIC_SORT_MODE = "trafficSortMode"
@@ -153,10 +154,11 @@ fun logLevelString(level: Int): String = when (level) {
     else -> "info"
 }
 
-object TunImplementation {
+object TunIpStack {
     const val GVISOR = 0
     const val SYSTEM = 1
     const val MIXED = 2
+    const val GO = 3
 }
 
 object GroupType {

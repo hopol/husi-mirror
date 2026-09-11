@@ -72,13 +72,14 @@
 # DBus interface is only ever reached by name.
 -keep interface * extends org.freedesktop.dbus.interfaces.DBusInterface { *; }
 
-# FileKit 0.15.0 ships an ImageBitmap.encodeToByteArray() helper compiled
-# against skiko < 0.150, where Image.encodeToData took (format, quality).
-# Compose 1.12.0 brings skiko 0.150, which added a pngCompressionLevel
-# parameter, so ProGuard cannot resolve the call:
-#   can't find referenced method 'Data encodeToData(EncodedImageFormat,int)'
-#   in program class org.jetbrains.skia.Image
-# Nothing in husi encodes an ImageBitmap through FileKit -- the QR code writes
-# its own bytes -- so the broken helper is dead weight. Drop this once FileKit
-# publishes a build against the newer skiko.
--dontwarn io.github.vinceglb.filekit.dialogs.compose.util.**
+# FileKit's XDG file chooser registers its portal Response handler by looking
+# the method up reflectively, so the shrinker sees no caller and deletes it:
+#   IllegalStateException: No compatible DBusConnection signal-registration
+#   method found
+-keepclassmembers class * extends org.freedesktop.dbus.connections.AbstractConnection {
+    java.lang.AutoCloseable addGenericSigHandler(...);
+    java.lang.AutoCloseable addSigHandler(...);
+    void removeGenericSigHandler(...);
+    void removeSigHandler(...);
+}
+

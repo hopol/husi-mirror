@@ -26,8 +26,7 @@ import org.koin.core.annotation.KoinExperimentalAPI
 class MainActivity : ComposeActivity(), AndroidScopeComponent {
 
     override val scope by activityRetainedScope()
-    private val serviceConnection =
-        SagerConnection(SagerConnection.CONNECTION_ID_MAIN_ACTIVITY_FOREGROUND, true)
+    private val serviceConnection = SagerConnection(listenForDeath = true)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -44,10 +43,11 @@ class MainActivity : ComposeActivity(), AndroidScopeComponent {
                 }
         }
 
-        when (intent.action) {
-            Intent.ACTION_VIEW -> onNewIntent(intent)
-            else -> {}
-        }
+        val isFreshLaunch = savedInstanceState == null
+        if (isFreshLaunch) dispatchDeepLink(intent)
+        val initialProcessText = intent
+            .takeIf { isFreshLaunch && it.action == Intent.ACTION_PROCESS_TEXT }
+            ?.getStringExtra(Intent.EXTRA_PROCESS_TEXT)
 
         setContent {
             val permissionPlatform = rememberAndroidPermissionPlatform()
@@ -58,9 +58,7 @@ class MainActivity : ComposeActivity(), AndroidScopeComponent {
                     AppTheme {
                         MainScreen(
                             moveToBackground = { moveTaskToBack(true) },
-                            initialProcessText = intent
-                                .takeIf { it.action == Intent.ACTION_PROCESS_TEXT }
-                                ?.getStringExtra(Intent.EXTRA_PROCESS_TEXT),
+                            initialProcessText = initialProcessText,
                         )
                     }
                 }
@@ -71,18 +69,14 @@ class MainActivity : ComposeActivity(), AndroidScopeComponent {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
 
+        setIntent(intent)
+        dispatchDeepLink(intent)
+    }
+
+    private fun dispatchDeepLink(intent: Intent) {
+        if (intent.action != Intent.ACTION_VIEW) return
         val uri = intent.data ?: return
         DeepLinkDispatcher.emit(uri.toString())
-    }
-
-    override fun onStart() {
-        serviceConnection.updateConnectionId(SagerConnection.CONNECTION_ID_MAIN_ACTIVITY_FOREGROUND)
-        super.onStart()
-    }
-
-    override fun onStop() {
-        serviceConnection.updateConnectionId(SagerConnection.CONNECTION_ID_MAIN_ACTIVITY_BACKGROUND)
-        super.onStop()
     }
 
     override fun onDestroy() {

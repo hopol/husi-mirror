@@ -211,11 +211,18 @@
             android:taskAffinity=""
             android:theme="@style/Theme.Dialog" />
         <activity
-            android:name=".QuickToggleShortcut"
+            android:name=".QuickToggleActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:process=":bg"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <activity
+            android:name=".CreateQuickToggleShortcutActivity"
             android:excludeFromRecents="true"
             android:exported="true"
             android:label="@string/quick_toggle"
-            android:launchMode="singleTask"
             android:process=":bg"
             android:taskAffinity=""
             android:theme="@android:style/Theme.Translucent.NoTitleBar">
@@ -335,7 +342,9 @@
         <receiver
             android:name="fr.husi.tasker.TaskerReceiver"
             android:directBootAware="true"
+            android:enabled="false"
             android:exported="true"
+            android:permission="com.twofortyfouram.locale.permission.FIRE_SETTING"
             android:process=":bg"
             tools:ignore="ExportedReceiver">
             <intent-filter>
@@ -345,6 +354,7 @@
 
         <activity
             android:name="fr.husi.tasker.TaskerActivity"
+            android:enabled="false"
             android:exported="true">
             <intent-filter>
                 <action android:name="com.twofortyfouram.locale.intent.action.EDIT_SETTING" />
