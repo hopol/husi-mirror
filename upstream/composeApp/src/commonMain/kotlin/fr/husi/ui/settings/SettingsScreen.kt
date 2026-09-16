@@ -13,6 +13,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import fr.husi.compose.BoxedVerticalScrollbar
+import fr.husi.compose.ProvidePreferenceLocals
 import fr.husi.compose.collectAsStateWithLifecycle
 import fr.husi.compose.IconMaskColors
 import fr.husi.compose.MaskedIcon
@@ -27,6 +28,7 @@ import fr.husi.compose.withNavigation
 import fr.husi.database.DataStore
 import fr.husi.platform.PlatformInfo
 import fr.husi.resources.Res
+import fr.husi.resources.app_update_settings
 import fr.husi.resources.backup
 import fr.husi.resources.bug_report
 import fr.husi.resources.cag_dns
@@ -54,11 +56,11 @@ import fr.husi.resources.settings
 import fr.husi.resources.system_daemon
 import fr.husi.resources.timelapse
 import fr.husi.resources.tools_network
+import fr.husi.resources.update
 import fr.husi.resources.wifi
 import fr.husi.ui.NavRoutes
 import io.github.oikvpqya.compose.fastscroller.material3.defaultMaterialScrollbarStyle
 import io.github.oikvpqya.compose.fastscroller.rememberScrollbarAdapter
-import me.zhanghai.compose.preference.ProvidePreferenceLocals
 import org.jetbrains.compose.resources.stringResource
 
 @Composable
@@ -171,6 +173,18 @@ fun SettingsScreen(
                             },
                             onClick = { openSettingsPage(NavRoutes.SettingsPage.Kind.Ntp) },
                         )
+                        if (PlatformInfo.isAndroid) {
+                            Preference(
+                                title = { Text(stringResource(Res.string.app_update_settings)) },
+                                icon = {
+                                    MaskedIcon(
+                                        Res.drawable.update,
+                                        color = IconMaskColors.IconLightGreen,
+                                    )
+                                },
+                                onClick = { openSettingsPage(NavRoutes.SettingsPage.Kind.AppUpdate) },
+                            )
+                        }
                     }
 
                     item { PreferenceCategory(text = { Text(stringResource(Res.string.more)) }) }

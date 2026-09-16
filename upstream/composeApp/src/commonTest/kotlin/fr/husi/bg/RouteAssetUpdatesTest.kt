@@ -117,14 +117,6 @@ class RouteAssetUpdatesTest {
     // region URL construction
 
     @Test
-    fun `githubApiReleaseUrl includes repository full name`() {
-        assertEquals(
-            "https://api.github.com/repos/SagerNet/sing-geoip/releases/latest",
-            githubApiReleaseUrl("SagerNet/sing-geoip"),
-        )
-    }
-
-    @Test
     fun `githubCodloadTarGzUrl includes full name and branch`() {
         assertEquals(
             "https://codeload.github.com/SagerNet/sing-geosite/tar.gz/refs/heads/rule-set-unstable",
@@ -172,7 +164,7 @@ class RouteAssetUpdatesTest {
 
         assertEquals(1, updates.size)
         assertEquals("202605161045", (updates[0] as UpdateInfo.Github).newVersion)
-        verify { remoteSource.fetchString(githubApiReleaseUrl("SagerNet/sing-geoip")) }
+        verify { remoteSource.fetchString(githubApiLatestReleaseUrl("SagerNet/sing-geoip")) }
     }
 
     @Test
@@ -250,8 +242,8 @@ class RouteAssetUpdatesTest {
 
         updater.check()
 
-        verify { remoteSource.fetchString(githubApiReleaseUrl("SagerNet/sing-geoip")) }
-        verify { remoteSource.fetchString(githubApiReleaseUrl("SagerNet/sing-geosite")) }
+        verify { remoteSource.fetchString(githubApiLatestReleaseUrl("SagerNet/sing-geoip")) }
+        verify { remoteSource.fetchString(githubApiLatestReleaseUrl("SagerNet/sing-geosite")) }
     }
 
     // endregion
@@ -282,7 +274,7 @@ class RouteAssetUpdatesTest {
 
         assertEquals(1, updates.size)
         assertEquals("202605161045", (updates[0] as UpdateInfo.Github).newVersion)
-        verify { remoteSource.fetchString(githubApiReleaseUrl("runetfreedom/russia-v2ray-rules-dat")) }
+        verify { remoteSource.fetchString(githubApiLatestReleaseUrl("runetfreedom/russia-v2ray-rules-dat")) }
     }
 
     @Test
@@ -345,6 +337,51 @@ class RouteAssetUpdatesTest {
         )
 
         assertTrue(updater.check().isEmpty())
+    }
+
+    // endregion
+
+    // region migrateCustomRouteAssets
+
+    @Test
+    fun `migrateCustomRouteAssets moves known files out of geo and leaves unknown files`() {
+        val dir = createTempDir()
+        val geoDir = routeGeoDir(dir).also { it.mkdirs() }
+        geoDir.resolve("custom.srs").writeText("mine")
+        geoDir.resolve("geosite-cn.srs").writeText("managed")
+
+        migrateCustomRouteAssets(dir, listOf("custom.srs"))
+
+        val customDir = routeCustomGeoDir(dir)
+        assertFalse(geoDir.resolve("custom.srs").exists())
+        assertTrue(customDir.resolve("custom.srs").isFile)
+        assertEquals("mine", customDir.resolve("custom.srs").readText())
+        assertTrue(geoDir.resolve("geosite-cn.srs").isFile)
+        assertEquals("managed", geoDir.resolve("geosite-cn.srs").readText())
+    }
+
+    @Test
+    fun `migrateCustomRouteAssets is a no-op when destination already exists`() {
+        val dir = createTempDir()
+        val geoDir = routeGeoDir(dir).also { it.mkdirs() }
+        val customDir = routeCustomGeoDir(dir).also { it.mkdirs() }
+        geoDir.resolve("custom.srs").writeText("old")
+        customDir.resolve("custom.srs").writeText("already")
+
+        migrateCustomRouteAssets(dir, listOf("custom.srs"))
+
+        assertTrue(geoDir.resolve("custom.srs").isFile)
+        assertEquals("old", geoDir.resolve("custom.srs").readText())
+        assertEquals("already", customDir.resolve("custom.srs").readText())
+    }
+
+    @Test
+    fun `migrateCustomRouteAssets does not throw when geo is missing`() {
+        val dir = createTempDir()
+
+        migrateCustomRouteAssets(dir, listOf("custom.srs"))
+
+        assertFalse(routeCustomGeoDir(dir).exists())
     }
 
     // endregion

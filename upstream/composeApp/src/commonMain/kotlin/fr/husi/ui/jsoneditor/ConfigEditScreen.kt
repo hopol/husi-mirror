@@ -29,7 +29,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.input.OutputTransformation
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -47,6 +46,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -78,7 +78,6 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
@@ -429,27 +428,7 @@ private fun ConfigEditScreenContent(
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     val colorScheme = MaterialTheme.colorScheme
-    val syntaxStyles = remember(colorScheme) {
-        mapOf(
-            ConfigJsonTokenType.STRING to SpanStyle(color = Color(0xFFE6DB74)),
-            ConfigJsonTokenType.NUMBER to SpanStyle(color = Color(0xFF66D9EE)),
-            ConfigJsonTokenType.BOOLEAN to SpanStyle(color = Color(0xFFFA2772)),
-            ConfigJsonTokenType.NULL to SpanStyle(color = Color(0xFFA7E22E)),
-            ConfigJsonTokenType.PUNCTUATION to SpanStyle(
-                color = colorScheme.onSurface.copy(alpha = 0.7f),
-            ),
-            ConfigJsonTokenType.INVALID to SpanStyle(color = colorScheme.error),
-        )
-    }
-
-    val outputTransformation = remember(syntaxStyles) {
-        OutputTransformation {
-            val text = asCharSequence().toString()
-            for ((type, start, end) in configJsonEngine.document(text).tokens) {
-                addStyle(syntaxStyles.getValue(type), start, end)
-            }
-        }
-    }
+    val syntaxStyles = remember(colorScheme) { ConfigJsonSyntaxStyles(colorScheme) }
 
     Scaffold(
         modifier = modifier
@@ -507,11 +486,25 @@ private fun ConfigEditScreenContent(
             var editorPosition by remember { mutableStateOf<Offset?>(null) }
             var cursorRect by remember { mutableStateOf<Rect?>(null) }
             var editorFocused by remember { mutableStateOf(false) }
+            var lineHeightPx by remember { mutableIntStateOf(0) }
             val editorMinHeight = (
                     with(density) { editorHeightPx.toDp() } - extraHeight
                     ).coerceAtLeast(0.dp)
             val focusRequester = remember { FocusRequester() }
             val verticalScrollState = rememberScrollState()
+            val topPaddingPx = with(density) { innerPadding.calculateTopPadding().roundToPx() }
+            val highlightLines = remember(topPaddingPx) {
+                derivedStateOf {
+                    highlightedLineRange(
+                        scrollOffsetPx = verticalScrollState.value - topPaddingPx,
+                        viewportHeightPx = editorHeightPx,
+                        lineHeightPx = lineHeightPx,
+                    )
+                }
+            }
+            val outputTransformation = remember(syntaxStyles, highlightLines) {
+                configJsonOutputTransformation(syntaxStyles) { highlightLines.value }
+            }
             Row(
                 modifier = Modifier
                     .fillMaxSize()
@@ -577,7 +570,13 @@ private fun ConfigEditScreenContent(
                         lineLimits = TextFieldLineLimits.MultiLine(),
                         outputTransformation = outputTransformation,
                         onTextLayout = { getResult ->
-                            cursorRect = getResult()?.getCursorRect(viewModel.textFieldState.selection.end)
+                            val layout = getResult()
+                            if (layout != null && layout.lineCount > 0) {
+                                lineHeightPx =
+                                    (layout.getLineBottom(0) - layout.getLineTop(0)).toInt()
+                            }
+                            cursorRect =
+                                layout?.getCursorRect(viewModel.textFieldState.selection.end)
                         },
                     )
                     Spacer(modifier = Modifier.height(extraHeight))

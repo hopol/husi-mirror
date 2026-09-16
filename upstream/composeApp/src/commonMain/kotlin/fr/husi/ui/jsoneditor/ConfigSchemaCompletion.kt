@@ -34,6 +34,8 @@ class ConfigSchemaCompleter(
     private val jsonEngine: ConfigJsonEngine = ConfigJsonEngine(),
 ) {
 
+    private val variantsByReference = mutableMapOf<String, List<JsonObject>>()
+
     fun complete(text: String, cursor: Int): List<ConfigSchemaCompletion> {
         val context = scan(jsonEngine.document(text), cursor)
         if (!context.isInString && context.prefix.isEmpty()) return emptyList()
@@ -138,10 +140,10 @@ class ConfigSchemaCompleter(
 
         for (token in document.tokens) {
             if (token.start >= safeCursor) break
-            if (token.type == ConfigJsonTokenType.STRING) {
+            if (token.type.isStringLiteral) {
                 val stringIsKey = !frames.last().isArray &&
                     previousMeaningful(text, token.start - 1) in setOf('{', ',')
-                val isClosed = token.end - token.start >= 2 && text[token.end - 1] == '"'
+                val isClosed = token.isTerminated
                 val isInside = if (isClosed) safeCursor < token.end else safeCursor <= token.end
                 if (isInside) {
                     val contentStart = token.start + 1
@@ -237,8 +239,15 @@ class ConfigSchemaCompleter(
     ): List<JsonObject> {
         val reference = schema[$$"$ref"]?.jsonPrimitiveContent()
         if (reference != null && reference !in resolving) {
+            if (resolving.isEmpty()) {
+                variantsByReference[reference]?.let { return it }
+            }
             val resolved = resolveReference(reference)
-            if (resolved != null) return variants(resolved, resolving + reference)
+            if (resolved != null) {
+                val expanded = variants(resolved, resolving + reference)
+                if (resolving.isEmpty()) variantsByReference[reference] = expanded
+                return expanded
+            }
         }
 
         val base = JsonObject(schema.filterKeys { it !in schemaCompositionKeys })

@@ -20,6 +20,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.dp
 import fr.husi.bg.Executable
 import fr.husi.compose.BoxedVerticalScrollbar
+import fr.husi.compose.ProvidePreferenceLocals
 import fr.husi.compose.SimpleIconButton
 import fr.husi.compose.SimpleTopAppBar
 import fr.husi.compose.fadingEdge
@@ -32,6 +33,7 @@ import fr.husi.ktx.restartApplication
 import fr.husi.ktx.runOnDefaultDispatcher
 import fr.husi.repository.resolveRepository
 import fr.husi.resources.Res
+import fr.husi.resources.app_update_settings
 import fr.husi.resources.apply
 import fr.husi.resources.arrow_back
 import fr.husi.resources.back
@@ -49,12 +51,12 @@ import fr.husi.ui.LocalSnackbarEmitter
 import fr.husi.ui.NavRoutes
 import fr.husi.ui.StringOrRes
 import fr.husi.ui.PlatformDaemonSettingsGroup
+import fr.husi.ui.platformAppUpdateSettings
 import io.github.oikvpqya.compose.fastscroller.material3.defaultMaterialScrollbarStyle
 import io.github.oikvpqya.compose.fastscroller.rememberScrollbarAdapter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
-import me.zhanghai.compose.preference.ProvidePreferenceLocals
 import org.jetbrains.compose.resources.stringResource
 import org.jetbrains.compose.resources.vectorResource
 import kotlin.time.Duration.Companion.milliseconds
@@ -113,6 +115,7 @@ fun SettingsPageScreen(
         NavRoutes.SettingsPage.Kind.Inbound -> Res.string.inbound_settings
         NavRoutes.SettingsPage.Kind.Misc -> Res.string.cag_misc
         NavRoutes.SettingsPage.Kind.Ntp -> Res.string.ntp_category
+        NavRoutes.SettingsPage.Kind.AppUpdate -> Res.string.app_update_settings
     }
 
     Scaffold(
@@ -145,41 +148,56 @@ fun SettingsPageScreen(
                         .fadingEdge(listState),
                     contentPadding = contentPadding,
                 ) {
-                    preferenceGroup {
-                        when (kind) {
-                            NavRoutes.SettingsPage.Kind.General -> GeneralSettingsGroup(
+                    when (kind) {
+                        NavRoutes.SettingsPage.Kind.General -> preferenceGroup {
+                            GeneralSettingsGroup(
                                 needReload = { needReload() },
                                 needRestart = { needRestart() },
                                 showMessage = { message ->
                                     snackbar.show(StringOrRes.Direct(message))
                                 },
                             )
-                            NavRoutes.SettingsPage.Kind.Daemon -> PlatformDaemonSettingsGroup(
+                        }
+                        NavRoutes.SettingsPage.Kind.Daemon -> preferenceGroup {
+                            PlatformDaemonSettingsGroup(
                                 showMessage = { message ->
                                     snackbar.show(StringOrRes.Direct(message))
                                 },
                             )
-                            NavRoutes.SettingsPage.Kind.Route -> RouteSettingsGroup(
+                        }
+                        NavRoutes.SettingsPage.Kind.Route -> preferenceGroup {
+                            RouteSettingsGroup(
                                 needReload = { needReload() },
                                 openAppManager = openAppManager,
                             )
-                            NavRoutes.SettingsPage.Kind.Protocol -> ProtocolSettingsGroup(
-                                needReload = { needReload() },
-                            )
-                            NavRoutes.SettingsPage.Kind.Dns -> DnsSettingsGroup(
-                                needReload = { needReload() },
-                            )
-                            NavRoutes.SettingsPage.Kind.Inbound -> InboundSettingsGroup(
-                                needReload = { needReload() },
-                            )
-                            NavRoutes.SettingsPage.Kind.Misc -> MiscSettingsGroup(
-                                needReload = { needReload() },
-                                needRestart = { needRestart() },
-                            )
-                            NavRoutes.SettingsPage.Kind.Ntp -> NtpSettingsGroup(
+                        }
+                        NavRoutes.SettingsPage.Kind.Protocol -> preferenceGroup {
+                            ProtocolSettingsGroup(
                                 needReload = { needReload() },
                             )
                         }
+                        NavRoutes.SettingsPage.Kind.Dns -> preferenceGroup {
+                            DnsSettingsGroup(
+                                needReload = { needReload() },
+                            )
+                        }
+                        NavRoutes.SettingsPage.Kind.Inbound -> preferenceGroup {
+                            InboundSettingsGroup(
+                                needReload = { needReload() },
+                            )
+                        }
+                        NavRoutes.SettingsPage.Kind.Misc -> preferenceGroup {
+                            MiscSettingsGroup(
+                                needReload = { needReload() },
+                                needRestart = { needRestart() },
+                            )
+                        }
+                        NavRoutes.SettingsPage.Kind.Ntp -> preferenceGroup {
+                            NtpSettingsGroup(
+                                needReload = { needReload() },
+                            )
+                        }
+                        NavRoutes.SettingsPage.Kind.AppUpdate -> platformAppUpdateSettings()
                     }
                 }
 

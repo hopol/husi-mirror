@@ -5,6 +5,9 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable
 import fr.husi.GroupType
 import fr.husi.Key
+import fr.husi.bg.AppUpdateAutoChecker
+import fr.husi.bg.AppUpdateInfo
+import fr.husi.bg.BackendState
 import fr.husi.bg.DeepLinkDispatcher
 import fr.husi.database.DataStore
 import fr.husi.database.ProxyGroup
@@ -30,7 +33,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -62,6 +67,7 @@ class MainViewModel(
     private val repository: Repository = resolveRepository(),
     private val importLinkInteractor: ImportLinkInteractor = ImportLinkInteractor(),
     private val snackbar: SnackbarEmitter = SnackbarEmitter(),
+    private val appUpdateChecker: AppUpdateAutoChecker = AppUpdateAutoChecker(),
 ) : AutoCloseable {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -71,6 +77,9 @@ class MainViewModel(
 
     val dialogEvent: SharedFlow<MainAlertDialogEvent>
         field = MutableSharedFlow<MainAlertDialogEvent>()
+
+    val appUpdate: StateFlow<AppUpdateInfo?>
+        field = MutableStateFlow<AppUpdateInfo?>(null)
 
     private fun alertDialog(
         message: StringOrRes,
@@ -106,6 +115,25 @@ class MainViewModel(
                 }
             }
         }
+
+        scope.launch {
+            BackendState.status
+                .map { it.state.connected }
+                .distinctUntilChanged()
+                .collect { connected ->
+                    if (appUpdate.value != null) return@collect
+                    appUpdateChecker.checkIfDue(connected)?.let { appUpdate.value = it }
+                }
+        }
+    }
+
+    fun dismissAppUpdate() {
+        appUpdate.value = null
+    }
+
+    fun skipAppUpdate() = scope.launch {
+        appUpdate.value?.let { DataStore.appUpdateSkippedVersion.set(it.version) }
+        appUpdate.value = null
     }
 
     fun resetUrlTestStatus() {

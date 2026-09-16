@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -72,6 +73,7 @@ import fr.husi.resources.vpn_session_name
 import fr.husi.resources.vpn_session_name_summary
 import fr.husi.tasker.TaskerActivity
 import fr.husi.tasker.TaskerReceiver
+import fr.husi.ui.settings.appUpdateSettings
 import kotlinx.coroutines.flow.flowOf
 import org.jetbrains.compose.resources.stringResource
 
@@ -94,6 +96,10 @@ internal actual fun AutoConnectPreference(showMessage: (String) -> Unit) {
 
 @Composable
 internal actual fun PlatformDaemonSettingsGroup(showMessage: (String) -> Unit) {
+}
+
+internal actual fun LazyListScope.platformAppUpdateSettings() {
+    appUpdateSettings()
 }
 
 @Composable

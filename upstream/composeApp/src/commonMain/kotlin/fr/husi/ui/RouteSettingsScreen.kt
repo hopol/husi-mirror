@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastCoerceIn
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import fr.husi.bg.routeCustomGeoDir
 import fr.husi.bg.routeGeoDir
 import fr.husi.compose.AutoCompleteTextField
 import fr.husi.compose.BackHandler
@@ -58,6 +59,7 @@ import fr.husi.compose.MaskedIcon
 import fr.husi.compose.MultiSelectListPreference
 import fr.husi.compose.MultilineTextField
 import fr.husi.compose.PreferenceCategory
+import fr.husi.compose.ProvidePreferenceLocals
 import fr.husi.compose.SimpleIconButton
 import fr.husi.compose.SwitchPreference
 import fr.husi.compose.TextButton
@@ -169,7 +171,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import me.zhanghai.compose.preference.ListPreferenceType
-import me.zhanghai.compose.preference.ProvidePreferenceLocals
 import org.jetbrains.compose.resources.stringResource
 import org.jetbrains.compose.resources.vectorResource
 import java.io.File
@@ -455,8 +456,12 @@ private fun RouteSettings(
     onRuleSetCopy: suspend () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val geoDir = remember(resolveRepository().externalAssetsDir) {
-        routeGeoDir(resolveRepository().externalAssetsDir).takeIf { it.isDirectory }
+    val geoDirs = remember(resolveRepository().externalAssetsDir) {
+        val externalAssetsDir = resolveRepository().externalAssetsDir
+        listOf(
+            routeGeoDir(externalAssetsDir),
+            routeCustomGeoDir(externalAssetsDir),
+        ).filter { it.isDirectory }
     }
 
     val listState = rememberLazyListState()
@@ -586,7 +591,7 @@ private fun RouteSettings(
                             value = value,
                             onValueChange = onValueChange,
                             onOk = onOk,
-                            geoDir = geoDir,
+                            geoDirs = geoDirs,
                             onCopy = onRuleSetCopy,
                         )
                     },
@@ -609,7 +614,7 @@ private fun RouteSettings(
                             value = value,
                             onValueChange = onValueChange,
                             onOk = onOk,
-                            geoDir = geoDir,
+                            geoDirs = geoDirs,
                             onCopy = onRuleSetCopy,
                         )
                     },
@@ -1231,18 +1236,19 @@ private fun RuleSetAutoCompleteTextField(
     value: TextFieldValue,
     onValueChange: (TextFieldValue) -> Unit,
     onOk: () -> Unit,
-    geoDir: File?,
+    geoDirs: List<File>,
     onCopy: suspend () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var ruleSets by remember { mutableStateOf(emptyList<String>()) }
-    LaunchedEffect(geoDir) {
+    LaunchedEffect(geoDirs) {
         ruleSets = withContext(Dispatchers.IO) {
-            geoDir?.listFiles()
-                ?.filter { it.isFile && it.extension == "srs" }
-                ?.map { it.nameWithoutExtension }
-                ?.sorted()
-                .orEmpty()
+            geoDirs.flatMap { dir ->
+                dir.listFiles()
+                    ?.filter { it.isFile && it.extension == "srs" }
+                    ?.map { it.nameWithoutExtension }
+                    .orEmpty()
+            }.distinct().sorted()
         }
     }
 

@@ -178,6 +178,8 @@
     <string name="dns_only">僅 DNS</string>
     <string name="direct_dns">直連 DNS</string>
     <string name="remote_dns">遠端 DNS</string>
+    <string name="outbound_dns">出站 DNS</string>
+    <string name="outbound_dns_sum">解析出站伺服器位址。未設定時使用直連 DNS</string>
     <string name="connection_test_available_http">成功：HTTP 握手花費 %1$d 毫秒</string>
     <string name="allow_insecure_sum">停用憑證檢查。啟用後，此配置就跟明文一樣沒有安全性可言</string>
     <string name="allow_insecure">允許不安全的連線</string>
@@ -397,7 +399,6 @@
     <string name="menu_log">記錄檔</string>
     <string name="profile_traffic_statistics_summary">當停用時，使用的流量將不會被統計</string>
     <string name="app_statistics_disabled">應用程式流量統計資料被停用</string>
-    <string name="tun_ip_stack">TUN IP 棧</string>
     <string name="resolve_destination">解析目的地位址</string>
     <string name="clear_logcat">清除記錄檔</string>
     <string name="wireguard_local_address">本機位址</string>
@@ -665,7 +666,6 @@
     <string name="import_url">匯入 URL</string>
     <string name="duplicate_name">重複名稱</string>
     <string name="expect_srs">檔名預期以「.srs」為副檔名</string>
-    <string name="warn_starte_with_geo">檔名以「geosite-」或「geoip-」開頭的檔案可能會被清除。</string>
     <string name="permission_denied">權限被拒</string>
     <string name="access_local_network_denied">我們需要存取區域網路的權限，以連線至區域網路內的代理和裝置。</string>
     <string name="save_to_system">儲存至系統</string>
@@ -717,4 +717,33 @@
     <string name="ipv4" translatable="false">IPv4</string>
     <string name="ipv6" translatable="false">IPv6</string>
     <string name="connected_since">連線時間</string>
+
+    <string name="app_update_settings">應用程式更新</string>
+    <string name="app_update_auto_check">自動檢查更新</string>
+    <string name="app_update_auto_check_sum">每天啟動時檢查一次</string>
+    <string name="app_update_pre_release">接收預發布版本</string>
+    <string name="app_update_pre_release_sum">提供 Alpha、Beta 和候選發布版本</string>
+    <string name="app_update_only_when_connected">僅在已連線時檢查</string>
+    <string name="app_update_only_when_connected_sum">僅在代理執行時執行自動檢查</string>
+    <string name="app_update_token">GitHub 權杖</string>
+    <string name="app_update_use_shizuku">透過 Shizuku 靜默安裝</string>
+    <string name="app_update_use_shizuku_sum">安裝下載的套件時不顯示系統安裝提示</string>
+    <string name="app_update_shizuku_not_installed">Shizuku 未安裝</string>
+    <string name="app_update_shizuku_not_running">Shizuku 已安裝但未執行</string>
+    <string name="app_update_shizuku_unsupported">此 Shizuku 版本過舊</string>
+    <string name="app_update_shizuku_denied">Shizuku 權限被拒絕</string>
+    <string name="app_update_check_now">立即檢查更新</string>
+    <string name="app_update_checking">檢查中…</string>
+    <string name="app_update_never_checked">從未檢查</string>
+    <string name="app_update_last_check">上次檢查：%1$s</string>
+    <string name="app_update_up_to_date">已是最新版本</string>
+    <string name="app_update_available">版本 %1$s 可用</string>
+    <string name="app_update_download">更新</string>
+    <string name="app_update_open_release">開啟發布頁面</string>
+    <string name="app_update_skip_version">跳過此版本</string>
+    <string name="app_update_later">稍後</string>
+    <string name="app_update_downloading">下載中… %1$d%</string>
+    <string name="app_update_installing">安裝中…</string>
+    <string name="app_update_install_failed">安裝失敗：%1$s</string>
+    <string name="app_update_no_matching_asset">沒有與此裝置匹配的安裝套件。請開啟發布頁面手動下載。</string>
 </resources>

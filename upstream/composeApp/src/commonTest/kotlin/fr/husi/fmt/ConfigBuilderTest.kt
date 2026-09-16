@@ -20,6 +20,7 @@ import fr.husi.platform.PlatformInfo
 import fr.husi.test.HusiKoinTest
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -257,11 +258,11 @@ class ConfigBuilderTest : HusiKoinTest() {
         val tags = outbounds.map { it["tag"]!!.jsonPrimitive.content }
 
         assertEquals(tags.size, tags.toSet().size)
-        assertEquals(1, result.tagToID.values.count { it == terminal.id })
-        assertEquals(1, result.tagToID.values.count { it == member.id })
-        assertEquals(1, result.tagToID.values.count { it == proxySet.id })
-        assertEquals(1, result.tagToID.values.count { it == entry.id })
-        assertEquals("entry", result.mainTag)
+        assertEquals(1, result.metadata.tagToID.values.count { it == terminal.id })
+        assertEquals(1, result.metadata.tagToID.values.count { it == member.id })
+        assertEquals(1, result.metadata.tagToID.values.count { it == proxySet.id })
+        assertEquals(1, result.metadata.tagToID.values.count { it == entry.id })
+        assertEquals("entry", result.metadata.mainTag)
         assertEquals(
             "set",
             outbounds.single { it["tag"]?.jsonPrimitive?.content == "entry" }["detour"]
@@ -316,8 +317,8 @@ class ConfigBuilderTest : HusiKoinTest() {
             listOf("second", "first"),
             outbounds["set"]!!["outbounds"]!!.jsonArray.map { it.jsonPrimitive.content },
         )
-        assertEquals(1, result.tagToID.values.count { it == first.id })
-        assertEquals(1, result.tagToID.values.count { it == second.id })
+        assertEquals(1, result.metadata.tagToID.values.count { it == first.id })
+        assertEquals(1, result.metadata.tagToID.values.count { it == second.id })
     }
 
     @Test
@@ -374,7 +375,7 @@ class ConfigBuilderTest : HusiKoinTest() {
             it["domain"]?.jsonArray?.map { item -> item.jsonPrimitive.content } == listOf(domain)
         }
 
-        assertEquals(2, result.tagToID.values.count { it == target.id })
+        assertEquals(2, result.metadata.tagToID.values.count { it == target.id })
         assertEquals("target", ruleFor("target.example")["outbound"]?.jsonPrimitive?.content)
         assertEquals(
             "target-0",
@@ -412,8 +413,8 @@ class ConfigBuilderTest : HusiKoinTest() {
         val tags = outbounds.map { it["tag"]!!.jsonPrimitive.content }
 
         assertEquals(tags.size, tags.toSet().size)
-        assertEquals(1, result.tagToID.values.count { it == member.id })
-        assertEquals(1, result.tagToID.values.count { it == proxySet.id })
+        assertEquals(1, result.metadata.tagToID.values.count { it == member.id })
+        assertEquals(1, result.metadata.tagToID.values.count { it == proxySet.id })
         assertEquals(1, tags.count { it == "member" })
         assertEquals(1, tags.count { it == "set" })
         assertEquals(
@@ -462,9 +463,9 @@ class ConfigBuilderTest : HusiKoinTest() {
         val outbounds = parseOutboundList(result)
         val tags = outbounds.map { it["tag"]!!.jsonPrimitive.content }
         assertEquals(tags.size, tags.toSet().size)
-        assertEquals(1, result.tagToID.values.count { it == memberA.id })
-        assertEquals(1, result.tagToID.values.count { it == memberB.id })
-        assertEquals(1, result.tagToID.values.count { it == proxySet.id })
+        assertEquals(1, result.metadata.tagToID.values.count { it == memberA.id })
+        assertEquals(1, result.metadata.tagToID.values.count { it == memberB.id })
+        assertEquals(1, result.metadata.tagToID.values.count { it == proxySet.id })
         assertEquals(1, tags.count { it == "group-set" })
         assertEquals(1, tags.count { it == "group-member-a" })
         assertEquals(1, tags.count { it == "group-member-b" })
@@ -516,8 +517,8 @@ class ConfigBuilderTest : HusiKoinTest() {
                 .single { it["tag"]?.jsonPrimitive?.content == "mixed-set" }["outbounds"]!!
                 .jsonArray.map { it.jsonPrimitive.content },
         )
-        assertEquals(1, result.tagToID.values.count { it == memberA.id })
-        assertEquals(1, result.tagToID.values.count { it == memberB.id })
+        assertEquals(1, result.metadata.tagToID.values.count { it == memberA.id })
+        assertEquals(1, result.metadata.tagToID.values.count { it == memberB.id })
     }
 
     @Test
@@ -554,7 +555,7 @@ class ConfigBuilderTest : HusiKoinTest() {
         val result = buildConfig(proxySet, forTest = true)
         val outbounds = parseOutbounds(result)
 
-        assertEquals("set", result.mainTag)
+        assertEquals("set", result.metadata.mainTag)
         assertEquals(
             listOf("entry"),
             outbounds["set"]!!["outbounds"]!!.jsonArray.map { it.jsonPrimitive.content },
@@ -597,11 +598,11 @@ class ConfigBuilderTest : HusiKoinTest() {
         val tags = outboundList.map { it["tag"]!!.jsonPrimitive.content }
         val outbounds = outboundList.associateBy { it["tag"]!!.jsonPrimitive.content }
 
-        assertEquals("outer-set", result.mainTag)
+        assertEquals("outer-set", result.metadata.mainTag)
         assertEquals(tags.size, tags.toSet().size)
-        assertEquals(1, result.tagToID.values.count { it == outerSet.id })
-        assertEquals(1, result.tagToID.values.count { it == innerSet.id })
-        assertEquals(1, result.tagToID.values.count { it == leaf.id })
+        assertEquals(1, result.metadata.tagToID.values.count { it == outerSet.id })
+        assertEquals(1, result.metadata.tagToID.values.count { it == innerSet.id })
+        assertEquals(1, result.metadata.tagToID.values.count { it == leaf.id })
         assertEquals(
             listOf("inner-set"),
             outbounds["outer-set"]!!["outbounds"]!!.jsonArray.map { it.jsonPrimitive.content },
@@ -668,11 +669,11 @@ class ConfigBuilderTest : HusiKoinTest() {
         val tags = outboundList.map { it["tag"]!!.jsonPrimitive.content }
         val outbounds = outboundList.associateBy { it["tag"]!!.jsonPrimitive.content }
 
-        assertEquals("root-set", result.mainTag)
+        assertEquals("root-set", result.metadata.mainTag)
         assertEquals(tags.size, tags.toSet().size)
-        assertEquals(1, result.tagToID.values.count { it == rootSet.id })
-        assertEquals(1, result.tagToID.values.count { it == innerSet.id })
-        assertEquals(1, result.tagToID.values.count { it == innerEntry.id })
+        assertEquals(1, result.metadata.tagToID.values.count { it == rootSet.id })
+        assertEquals(1, result.metadata.tagToID.values.count { it == innerSet.id })
+        assertEquals(1, result.metadata.tagToID.values.count { it == innerEntry.id })
         assertEquals(
             listOf("inner-set"),
             outbounds["root-set"]!!["outbounds"]!!.jsonArray.map { it.jsonPrimitive.content },
@@ -867,8 +868,8 @@ class ConfigBuilderTest : HusiKoinTest() {
 
         val result = buildConfig(proxy, forTest = true)
 
-        assertEquals("orphan", result.mainTag)
-        assertEquals(proxy.id, result.tagToID["orphan"])
+        assertEquals("orphan", result.metadata.mainTag)
+        assertEquals(proxy.id, result.metadata.tagToID["orphan"])
     }
 
     @Test
@@ -928,12 +929,12 @@ class ConfigBuilderTest : HusiKoinTest() {
         assertEquals(tags.size, tags.toSet().size)
         assertTrue(firstEntryTag != secondEntryTag)
         assertTrue(firstExitTag != secondExitTag)
-        assertEquals(2, result.tagToID.values.count { it == sharedEntry.id })
-        assertEquals(2, result.tagToID.values.count { it == sharedExit.id })
-        assertEquals(sharedEntry.id, result.tagToID[firstEntryTag])
-        assertEquals(sharedEntry.id, result.tagToID[secondEntryTag])
-        assertEquals(sharedExit.id, result.tagToID[firstExitTag])
-        assertEquals(sharedExit.id, result.tagToID[secondExitTag])
+        assertEquals(2, result.metadata.tagToID.values.count { it == sharedEntry.id })
+        assertEquals(2, result.metadata.tagToID.values.count { it == sharedExit.id })
+        assertEquals(sharedEntry.id, result.metadata.tagToID[firstEntryTag])
+        assertEquals(sharedEntry.id, result.metadata.tagToID[secondEntryTag])
+        assertEquals(sharedExit.id, result.metadata.tagToID[firstExitTag])
+        assertEquals(sharedExit.id, result.metadata.tagToID[secondExitTag])
         assertEquals(null, outbounds[firstExitTag]!!["detour"])
         assertEquals(
             "first-set",
@@ -987,7 +988,7 @@ class ConfigBuilderTest : HusiKoinTest() {
         )
 
         val result = buildConfig(proxySet, forTest = true)
-        val externalEntries = result.externalIndex
+        val externalEntries = result.metadata.externalIndex
             .flatMap { it.chain.values }
             .filter { it.id == external.id }
 
@@ -1022,7 +1023,7 @@ class ConfigBuilderTest : HusiKoinTest() {
 
         val result = buildConfig(root, forTest = true)
         val outbounds = parseOutbounds(result)
-        val sharedTags = result.tagToID.filterValues { it == shared.id }.keys.toList()
+        val sharedTags = result.metadata.tagToID.filterValues { it == shared.id }.keys.toList()
 
         assertEquals(2, sharedTags.size)
         assertEquals(2, sharedTags.toSet().size)
@@ -1096,18 +1097,18 @@ class ConfigBuilderTest : HusiKoinTest() {
         val memberTags = outbounds["branch-set"]!!["outbounds"]!!.jsonArray
             .map { it.jsonPrimitive.content }
 
-        assertEquals("branch-set", result.mainTag)
+        assertEquals("branch-set", result.metadata.mainTag)
         assertEquals(tags.size, tags.toSet().size)
         assertEquals(2, memberTags.size)
         assertEquals(2, memberTags.toSet().size)
-        assertTrue(memberTags.all { result.tagToID[it] == sharedLeaf.id })
-        assertEquals(2, result.tagToID.values.count { it == sharedLeaf.id })
+        assertTrue(memberTags.all { result.metadata.tagToID[it] == sharedLeaf.id })
+        assertEquals(2, result.metadata.tagToID.values.count { it == sharedLeaf.id })
 
         val exitTags = memberTags.map { memberTag ->
             outbounds[memberTag]!!["detour"]!!.jsonPrimitive.content
         }
         assertEquals(setOf("first-exit", "second-exit"), exitTags.toSet())
-        assertEquals(setOf(firstExit.id, secondExit.id), exitTags.map { result.tagToID[it] }.toSet())
+        assertEquals(setOf(firstExit.id, secondExit.id), exitTags.map { result.metadata.tagToID[it] }.toSet())
         assertEquals("outer-exit", outbounds["first-exit"]!!["detour"]?.jsonPrimitive?.content)
         assertEquals("outer-exit", outbounds["second-exit"]!!["detour"]?.jsonPrimitive?.content)
         assertEquals(null, outbounds["outer-exit"]!!["detour"])
@@ -1155,11 +1156,11 @@ class ConfigBuilderTest : HusiKoinTest() {
             .single().jsonPrimitive.content
 
         assertEquals("entry", memberTag)
-        assertEquals(entry.id, result.tagToID[memberTag])
+        assertEquals(entry.id, result.metadata.tagToID[memberTag])
         assertEquals("exit", outbounds[memberTag]!!["detour"]?.jsonPrimitive?.content)
         assertEquals(null, outbounds["exit"]!!["detour"])
-        assertEquals(1, result.tagToID.values.count { it == entry.id })
-        assertEquals(1, result.tagToID.values.count { it == exit.id })
+        assertEquals(1, result.metadata.tagToID.values.count { it == entry.id })
+        assertEquals(1, result.metadata.tagToID.values.count { it == exit.id })
     }
 
     @Test
@@ -1294,9 +1295,9 @@ class ConfigBuilderTest : HusiKoinTest() {
         val secondMemberTag = secondSelector["outbounds"]!!.jsonArray.single().jsonPrimitive.content
 
         assertTrue(firstMemberTag != secondMemberTag)
-        assertEquals(2, result.tagToID.values.count { it == member.id })
-        assertEquals(member.id, result.tagToID[firstMemberTag])
-        assertEquals(member.id, result.tagToID[secondMemberTag])
+        assertEquals(2, result.metadata.tagToID.values.count { it == member.id })
+        assertEquals(member.id, result.metadata.tagToID[firstMemberTag])
+        assertEquals(member.id, result.metadata.tagToID[secondMemberTag])
         assertEquals(
             "first-set",
             outbounds.single { it["tag"]?.jsonPrimitive?.content == secondMemberTag }["detour"]
@@ -1346,7 +1347,7 @@ class ConfigBuilderTest : HusiKoinTest() {
         val outbounds = parseOutbounds(result)
         val endpoints = parseEndpoints(result)
 
-        assertEquals("urltest", result.mainTag)
+        assertEquals("urltest", result.metadata.mainTag)
         assertEquals(
             SingBoxOptions.TYPE_URLTEST,
             outbounds["urltest"]!!["type"]?.jsonPrimitive?.content,
@@ -1362,7 +1363,7 @@ class ConfigBuilderTest : HusiKoinTest() {
         )
         assertEquals("exit", endpoints["endpoint"]!!["detour"]?.jsonPrimitive?.content)
         assertEquals(null, outbounds["exit"]!!["detour"])
-        assertEquals(endpoint.id, result.tagToID["endpoint"])
+        assertEquals(endpoint.id, result.metadata.tagToID["endpoint"])
     }
 
     @Test
@@ -1418,7 +1419,7 @@ class ConfigBuilderTest : HusiKoinTest() {
         }
         val mappingTag = mappingRule["inbound"]!!.jsonArray.single().jsonPrimitive.content
 
-        assertEquals("set", result.mainTag)
+        assertEquals("set", result.metadata.mainTag)
         assertEquals(
             listOf("external"),
             outbounds["set"]!!["outbounds"]!!.jsonArray.map { it.jsonPrimitive.content },
@@ -1433,7 +1434,7 @@ class ConfigBuilderTest : HusiKoinTest() {
         assertEquals("tail", outbounds["member-exit"]!!["detour"]?.jsonPrimitive?.content)
         assertEquals(
             1,
-            result.externalIndex.flatMap { it.chain.values }.count { it.id == external.id },
+            result.metadata.externalIndex.flatMap { it.chain.values }.count { it.id == external.id },
         )
     }
 
@@ -1473,7 +1474,7 @@ class ConfigBuilderTest : HusiKoinTest() {
             ),
         )
 
-        val externalEntries = buildConfig(chain).externalIndex
+        val externalEntries = buildConfig(chain).metadata.externalIndex
             .flatMap { it.chain.entries }
             .filter { it.value.id == external.id }
 
@@ -1997,6 +1998,293 @@ class ConfigBuilderTest : HusiKoinTest() {
     }
 
     @Test
+    fun `buildConfig with one remote and one direct DNS keeps single server tags`() = runBlocking {
+        disableFakeDns()
+        DataStore.remoteDns.set("tcp://1.1.1.1")
+        DataStore.directDns.set("local")
+
+        val group = ProxyGroup(name = "group").applyDefaultValues()
+        group.id = SagerDatabase.groupDao.createGroup(group)
+        val proxy = createSocksProxy(
+            groupId = group.id,
+            order = 1,
+            name = "main",
+            host = "1.1.1.1",
+            port = 1080,
+        )
+
+        val result = buildConfig(proxy)
+        val dnsServers = parseDnsServers(result)
+        val dnsRules = parseDnsRules(result)
+
+        assertNotNull(dnsServers[TAG_DNS_REMOTE])
+        assertNotNull(dnsServers[TAG_DNS_DIRECT])
+        assertEquals(null, dnsServers["$TAG_DNS_REMOTE-1"])
+        assertEquals(null, dnsServers["$TAG_DNS_DIRECT-1"])
+        assertEquals(TAG_DNS_REMOTE, parseDnsFinal(result))
+        assertEquals(
+            -1,
+            dnsRules.indexOfFirst { it["race"]?.jsonPrimitive?.boolean == true },
+        )
+        val globalRule = dnsRules.first {
+            it["clash_mode"]?.jsonPrimitive?.content == RuleEntity.MODE_GLOBAL
+        }
+        assertEquals(TAG_DNS_REMOTE, globalRule["server"]?.jsonPrimitive?.content)
+        assertEquals(null, globalRule["action"])
+        val directRule = dnsRules.first {
+            it["clash_mode"]?.jsonPrimitive?.content == RuleEntity.MODE_DIRECT
+        }
+        assertEquals(TAG_DNS_DIRECT, directRule["server"]?.jsonPrimitive?.content)
+        assertEquals(null, directRule["action"])
+    }
+
+    @Test
+    fun `buildConfig with two remote DNS servers races them`() = runBlocking {
+        disableFakeDns()
+        DataStore.remoteDns.set("1.1.1.1\n8.8.8.8")
+        DataStore.directDns.set("local")
+
+        val group = ProxyGroup(name = "group").applyDefaultValues()
+        group.id = SagerDatabase.groupDao.createGroup(group)
+        val proxy = createSocksProxy(
+            groupId = group.id,
+            order = 1,
+            name = "main",
+            host = "1.1.1.1",
+            port = 1080,
+        )
+
+        val result = buildConfig(proxy)
+        val dnsServers = parseDnsServers(result)
+        val dnsRules = parseDnsRules(result)
+        val remote1 = "$TAG_DNS_REMOTE-1"
+
+        assertEquals("main", dnsServers[TAG_DNS_REMOTE]?.get("detour")?.jsonPrimitive?.content)
+        assertEquals("main", dnsServers[remote1]?.get("detour")?.jsonPrimitive?.content)
+        assertEquals(TAG_DNS_REMOTE, parseDnsFinal(result))
+
+        val lastRules = dnsRules.takeLast(4)
+        assertRaceBlock(lastRules, listOf(TAG_DNS_REMOTE, remote1))
+        lastRules.take(2).forEach { rule ->
+            assertEquals(null, rule["clash_mode"])
+            assertEquals(null, rule["domain"])
+        }
+
+        val globalStart = dnsRules.indexOfFirst {
+            it["clash_mode"]?.jsonPrimitive?.content == RuleEntity.MODE_GLOBAL
+        }
+        assertTrue(globalStart >= 0)
+        val globalBlock = dnsRules.subList(globalStart, globalStart + 4)
+        assertRaceBlock(globalBlock, listOf(TAG_DNS_REMOTE, remote1))
+        globalBlock.take(2).forEach { rule ->
+            assertEquals(
+                RuleEntity.MODE_GLOBAL,
+                rule["clash_mode"]?.jsonPrimitive?.content,
+            )
+        }
+        globalBlock.takeLast(2).forEach { rule ->
+            assertEquals(null, rule["clash_mode"])
+            assertEquals(null, rule["server"])
+        }
+    }
+
+    @Test
+    fun `buildConfig with two direct DNS servers races them`() = runBlocking {
+        disableFakeDns()
+        DataStore.remoteDns.set("1.1.1.1")
+        DataStore.directDns.set("1.0.0.1\n8.8.4.4")
+
+        val group = ProxyGroup(name = "group").applyDefaultValues()
+        group.id = SagerDatabase.groupDao.createGroup(group)
+        val proxy = createSocksProxy(
+            groupId = group.id,
+            order = 1,
+            name = "main",
+            host = "proxy.example.com",
+            port = 1080,
+        )
+
+        val result = buildConfig(proxy)
+        val dnsServers = parseDnsServers(result)
+        val dnsRules = parseDnsRules(result)
+        val direct1 = "$TAG_DNS_DIRECT-1"
+
+        assertNotNull(dnsServers[TAG_DNS_DIRECT])
+        assertNotNull(dnsServers[direct1])
+
+        val forceStart = dnsRules.indexOfFirst { rule ->
+            rule["domain"]?.jsonArray?.any { it.jsonPrimitive.content == "proxy.example.com" } == true
+        }
+        assertTrue(forceStart >= 0)
+        val forceBlock = dnsRules.subList(forceStart, forceStart + 4)
+        assertRaceBlock(forceBlock, listOf(TAG_DNS_DIRECT, direct1))
+        forceBlock.take(2).forEach { rule ->
+            assertTrue(
+                rule["domain"]!!.jsonArray.map { it.jsonPrimitive.content }
+                    .contains("proxy.example.com"),
+            )
+        }
+        forceBlock.takeLast(2).forEach { rule ->
+            assertEquals(null, rule["domain"])
+        }
+
+        val directModeStart = dnsRules.indexOfFirst {
+            it["clash_mode"]?.jsonPrimitive?.content == RuleEntity.MODE_DIRECT
+        }
+        assertTrue(directModeStart >= 0)
+        val directModeBlock = dnsRules.subList(directModeStart, directModeStart + 4)
+        assertRaceBlock(directModeBlock, listOf(TAG_DNS_DIRECT, direct1))
+        directModeBlock.take(2).forEach { rule ->
+            assertEquals(
+                RuleEntity.MODE_DIRECT,
+                rule["clash_mode"]?.jsonPrimitive?.content,
+            )
+        }
+        directModeBlock.takeLast(2).forEach { rule ->
+            assertEquals(null, rule["clash_mode"])
+        }
+    }
+
+    @Test
+    fun `buildConfig should race request-based proxy DNS rules across remote servers`() =
+        runBlocking {
+            disableFakeDns()
+            DataStore.remoteDns.set("1.1.1.1\n8.8.8.8")
+            DataStore.directDns.set("local")
+
+            val group = ProxyGroup(name = "group").applyDefaultValues()
+            group.id = SagerDatabase.groupDao.createGroup(group)
+            val proxy = createSocksProxy(
+                groupId = group.id,
+                order = 1,
+                name = "main",
+                host = "1.1.1.1",
+                port = 1080,
+            )
+            ProfileManager.createRule(
+                RuleEntity(
+                    enabled = true,
+                    name = "dns-domains-proxy",
+                    domains = "full:example.com\ndomain:example.org",
+                    outbound = RuleEntity.OUTBOUND_PROXY,
+                ),
+            )
+
+            val dnsRules = parseDnsRules(buildConfig(proxy))
+            val start = dnsRules.indexOfFirst { rule ->
+                rule["domain"]?.jsonArray?.map { it.jsonPrimitive.content } == listOf("example.com")
+            }
+            assertTrue(start >= 0)
+            val block = dnsRules.subList(start, start + 4)
+            assertRaceBlock(block, listOf(TAG_DNS_REMOTE, "$TAG_DNS_REMOTE-1"))
+            block.take(2).forEach { rule ->
+                assertEquals(
+                    listOf("example.com"),
+                    rule["domain"]!!.jsonArray.map { it.jsonPrimitive.content },
+                )
+                assertEquals(
+                    listOf("example.org"),
+                    rule["domain_suffix"]!!.jsonArray.map { it.jsonPrimitive.content },
+                )
+            }
+            block.takeLast(2).forEach { rule ->
+                assertEquals(null, rule["domain"])
+                assertEquals(null, rule["domain_suffix"])
+            }
+        }
+
+    @Test
+    fun `buildConfig should route request-based proxy DNS rules to fake DNS without racing`() =
+        runBlocking {
+            DataStore.enableFakeDns.set(true)
+            DataStore.fakeDNSForAll.set(false)
+            DataStore.remoteDns.set("1.1.1.1\n8.8.8.8")
+            DataStore.directDns.set("local")
+
+            val group = ProxyGroup(name = "group").applyDefaultValues()
+            group.id = SagerDatabase.groupDao.createGroup(group)
+            val proxy = createSocksProxy(
+                groupId = group.id,
+                order = 1,
+                name = "main",
+                host = "1.1.1.1",
+                port = 1080,
+            )
+            ProfileManager.createRule(
+                RuleEntity(
+                    enabled = true,
+                    name = "dns-domains-proxy",
+                    domains = "full:example.com\ndomain:example.org",
+                    outbound = RuleEntity.OUTBOUND_PROXY,
+                ),
+            )
+
+            val dnsRules = parseDnsRules(buildConfig(proxy))
+            val rule = dnsRules.first {
+                it["domain"]?.jsonArray?.map { item -> item.jsonPrimitive.content } ==
+                    listOf("example.com")
+            }
+            assertEquals(TAG_DNS_FAKE, rule["server"]?.jsonPrimitive?.content)
+            assertEquals(null, rule["race"])
+            assertEquals(
+                -1,
+                dnsRules.indexOfFirst {
+                    it["action"]?.jsonPrimitive?.content == SingBoxOptions.ACTION_EVALUATE &&
+                        it["domain"] != null
+                },
+            )
+        }
+
+    @Test
+    fun `buildConfig should keep response-based DNS rules un-raced with two remotes`() =
+        runBlocking {
+            disableFakeDns()
+            DataStore.remoteDns.set("1.1.1.1\n8.8.8.8")
+            DataStore.directDns.set("local")
+
+            val group = ProxyGroup(name = "group").applyDefaultValues()
+            group.id = SagerDatabase.groupDao.createGroup(group)
+            val proxy = createSocksProxy(
+                groupId = group.id,
+                order = 1,
+                name = "main",
+                host = "1.1.1.1",
+                port = 1080,
+            )
+            ProfileManager.createRule(
+                RuleEntity(
+                    enabled = true,
+                    name = "dns-geoip-proxy",
+                    ip = "set+dns:geoip-cn",
+                    outbound = RuleEntity.OUTBOUND_PROXY,
+                ),
+            )
+
+            val dnsRules = parseDnsRules(buildConfig(proxy))
+            val evaluateIndex = dnsRules.indexOfFirst {
+                it["action"]?.jsonPrimitive?.content == SingBoxOptions.ACTION_EVALUATE &&
+                    it["tag"] == null
+            }
+            assertTrue(evaluateIndex >= 0)
+            val evaluateRule = dnsRules[evaluateIndex]
+            assertEquals(TAG_DNS_REMOTE, evaluateRule["server"]?.jsonPrimitive?.content)
+            assertEquals(null, evaluateRule["tag"])
+
+            val responseRule = dnsRules[evaluateIndex + 1]
+            assertEquals(
+                SingBoxOptions.ACTION_RESPOND,
+                responseRule["action"]?.jsonPrimitive?.content,
+            )
+            assertEquals("true", responseRule["match_response"]?.jsonPrimitive?.content)
+            assertEquals(null, responseRule["server"])
+            assertEquals(null, responseRule["race"])
+            assertEquals(
+                listOf("geoip-cn"),
+                responseRule["rule_set"]!!.jsonArray.map { it.jsonPrimitive.content },
+            )
+        }
+
+    @Test
     fun `chain traffic covers every hop and the chain itself`() = runBlocking {
         val group = ProxyGroup(name = "group").applyDefaultValues()
         group.id = SagerDatabase.groupDao.createGroup(group)
@@ -2024,10 +2312,10 @@ class ConfigBuilderTest : HusiKoinTest() {
 
         val result = buildConfig(chain, forTest = true)
 
-        assertEquals("entry", result.mainTag)
+        assertEquals("entry", result.metadata.mainTag)
         assertEquals(
             setOf(entry.id, exit.id, chain.id),
-            result.trafficProfiles.mapTo(HashSet()) { it.id },
+            result.metadata.trafficProfiles.mapTo(HashSet()) { it.id },
         )
         assertEquals(
             mapOf(
@@ -2037,7 +2325,7 @@ class ConfigBuilderTest : HusiKoinTest() {
                 ),
                 "exit" to TrafficNode(profileIDs = setOf(exit.id, chain.id)),
             ),
-            result.trafficGraph,
+            result.metadata.trafficGraph,
             "both hops earn traffic for the chain that owns them",
         )
     }
@@ -2083,10 +2371,10 @@ class ConfigBuilderTest : HusiKoinTest() {
 
         val result = buildConfig(proxySet, forTest = true)
 
-        assertEquals("set-main", result.mainTag)
+        assertEquals("set-main", result.metadata.mainTag)
         assertEquals(
             setOf(proxySet.id, memberChain.id, memberEntry.id, memberExit.id, plainMember.id),
-            result.trafficProfiles.mapTo(HashSet()) { it.id },
+            result.metadata.trafficProfiles.mapTo(HashSet()) { it.id },
         )
 
         assertEquals(
@@ -2104,7 +2392,7 @@ class ConfigBuilderTest : HusiKoinTest() {
                 ),
                 "plain-member" to TrafficNode(profileIDs = setOf(plainMember.id)),
             ),
-            result.trafficGraph,
+            result.metadata.trafficGraph,
         )
     }
 
@@ -2195,28 +2483,155 @@ class ConfigBuilderTest : HusiKoinTest() {
             assertEquals(null, parseEndpoints(buildConfig(chain))["vpn"]!!["on_demand"])
         }
 
+    @Test
+    fun `buildConfig without outbound DNS resolves server addresses by direct DNS`() = runBlocking {
+        disableFakeDns()
+
+        val group = ProxyGroup(name = "group").applyDefaultValues()
+        group.id = SagerDatabase.groupDao.createGroup(group)
+        val proxy = createSocksProxy(
+            groupId = group.id,
+            order = 1,
+            name = "main",
+            host = "server.example.com",
+            port = 1080,
+        )
+
+        val result = buildConfig(proxy)
+
+        assertEquals(null, parseDnsServers(result)[TAG_DNS_OUTBOUND])
+        assertEquals(
+            TAG_DNS_DIRECT,
+            serverDomainRule(result, "server.example.com")["server"]?.jsonPrimitive?.content,
+        )
+    }
+
+    @Test
+    fun `buildConfig with group outbound DNS resolves server addresses by it`() = runBlocking {
+        disableFakeDns()
+
+        val group = ProxyGroup(name = "group", outboundDns = "tcp://1.1.1.1").applyDefaultValues()
+        group.id = SagerDatabase.groupDao.createGroup(group)
+        val proxy = createSocksProxy(
+            groupId = group.id,
+            order = 1,
+            name = "main",
+            host = "server.example.com",
+            port = 1080,
+        )
+
+        val result = buildConfig(proxy)
+        val server = assertNotNull(parseDnsServers(result)[TAG_DNS_OUTBOUND])
+
+        assertEquals(SingBoxOptions.DNS_TYPE_TCP, server["type"]?.jsonPrimitive?.content)
+        assertEquals("1.1.1.1", server["server"]?.jsonPrimitive?.content)
+        assertEquals(null, server["detour"])
+        assertEquals(
+            TAG_DNS_LOCAL,
+            server["domain_resolver"]?.jsonObject?.get("server")?.jsonPrimitive?.content,
+        )
+        assertEquals(
+            TAG_DNS_OUTBOUND,
+            serverDomainRule(result, "server.example.com")["server"]?.jsonPrimitive?.content,
+        )
+    }
+
+    @Test
+    fun `buildConfig gives each group its own outbound DNS server`() = runBlocking {
+        disableFakeDns()
+
+        val sharedGroup = ProxyGroup(name = "shared", outboundDns = "tcp://1.1.1.1")
+            .applyDefaultValues()
+        sharedGroup.id = SagerDatabase.groupDao.createGroup(sharedGroup)
+        val otherGroup = ProxyGroup(name = "other", outboundDns = "tcp://8.8.8.8").applyDefaultValues()
+        otherGroup.id = SagerDatabase.groupDao.createGroup(otherGroup)
+
+        val exit = createSocksProxy(
+            groupId = sharedGroup.id,
+            order = 1,
+            name = "exit",
+            host = "exit.example.com",
+            port = 1080,
+        )
+        val front = createSocksProxy(
+            groupId = otherGroup.id,
+            order = 2,
+            name = "front",
+            host = "front.example.com",
+            port = 1080,
+        )
+        val chain = createChain(
+            groupId = sharedGroup.id,
+            order = 3,
+            name = "chain",
+            proxies = listOf(exit.id, front.id),
+        )
+
+        val result = buildConfig(chain)
+        val servers = parseDnsServers(result)
+
+        fun serverAddressOf(domain: String): String? {
+            val tag = serverDomainRule(result, domain)["server"]!!.jsonPrimitive.content
+            assertTrue(tag.startsWith(TAG_DNS_OUTBOUND))
+            return assertNotNull(servers[tag])["server"]?.jsonPrimitive?.content
+        }
+
+        assertEquals("1.1.1.1", serverAddressOf("exit.example.com"))
+        assertEquals("8.8.8.8", serverAddressOf("front.example.com"))
+    }
+
+    private fun serverDomainRule(result: ConfigBuildResult, domain: String) =
+        parseDnsRules(result).first { rule ->
+            rule["domain"]?.jsonArray?.any { it.jsonPrimitive.content == domain } == true
+        }
+
     private fun parseOutbounds(result: ConfigBuildResult) =
-        Json.parseToJsonElement(result.config).jsonObject["outbounds"]!!
+        Json.parseToJsonElement(result.configJson).jsonObject["outbounds"]!!
             .jsonArray
             .associateBy { it.jsonObject["tag"]!!.jsonPrimitive.content }
             .mapValues { it.value.jsonObject }
 
     private fun parseOutboundList(result: ConfigBuildResult) =
-        Json.parseToJsonElement(result.config).jsonObject["outbounds"]!!
+        Json.parseToJsonElement(result.configJson).jsonObject["outbounds"]!!
             .jsonArray
             .map { it.jsonObject }
 
     private fun parseEndpoints(result: ConfigBuildResult) =
-        Json.parseToJsonElement(result.config).jsonObject["endpoints"]!!
+        Json.parseToJsonElement(result.configJson).jsonObject["endpoints"]!!
             .jsonArray
             .associateBy { it.jsonObject["tag"]!!.jsonPrimitive.content }
             .mapValues { it.value.jsonObject }
 
     private fun parseDnsRules(result: ConfigBuildResult) =
-        Json.parseToJsonElement(result.config).jsonObject["dns"]!!
+        Json.parseToJsonElement(result.configJson).jsonObject["dns"]!!
             .jsonObject["rules"]!!
             .jsonArray
             .map { it.jsonObject }
+
+    private fun parseDnsFinal(result: ConfigBuildResult) =
+        Json.parseToJsonElement(result.configJson).jsonObject["dns"]!!
+            .jsonObject["final"]!!.jsonPrimitive.content
+
+    private fun assertRaceBlock(rules: List<JsonObject>, tags: List<String>) {
+        assertEquals(tags.size * 2, rules.size)
+        tags.forEachIndexed { index, tag ->
+            val evaluate = rules[index]
+            assertEquals(
+                SingBoxOptions.ACTION_EVALUATE,
+                evaluate["action"]?.jsonPrimitive?.content,
+            )
+            assertEquals(tag, evaluate["server"]?.jsonPrimitive?.content)
+            assertEquals(tag, evaluate["tag"]?.jsonPrimitive?.content)
+            val respond = rules[tags.size + index]
+            assertEquals(
+                SingBoxOptions.ACTION_RESPOND,
+                respond["action"]?.jsonPrimitive?.content,
+            )
+            assertEquals(tag, respond["match_response"]?.jsonPrimitive?.content)
+            assertEquals(true, respond["race"]?.jsonPrimitive?.boolean)
+            assertEquals(null, respond["server"])
+        }
+    }
 
     @Test
     fun `buildConfig for export should resolve asset rule sets from their own URL`() = runBlocking {
@@ -2273,7 +2688,7 @@ class ConfigBuilderTest : HusiKoinTest() {
             )
 
             val result = buildConfig(proxy, forExport = true)
-            val httpClients = Json.parseToJsonElement(result.config)
+            val httpClients = Json.parseToJsonElement(result.configJson)
                 .jsonObject["http_clients"]!!
                 .jsonArray
                 .map { it.jsonObject }
@@ -2284,7 +2699,7 @@ class ConfigBuilderTest : HusiKoinTest() {
                 httpClients.single()["tag"]?.jsonPrimitive?.content,
             )
             assertEquals(
-                result.mainTag,
+                result.metadata.mainTag,
                 httpClients.single()["detour"]?.jsonPrimitive?.content,
             )
             assertEquals(
@@ -2294,16 +2709,16 @@ class ConfigBuilderTest : HusiKoinTest() {
         }
 
     private fun parseRouteOptions(result: ConfigBuildResult) =
-        Json.parseToJsonElement(result.config).jsonObject["route"]!!.jsonObject
+        Json.parseToJsonElement(result.configJson).jsonObject["route"]!!.jsonObject
 
     private fun parseRouteRules(result: ConfigBuildResult) =
-        Json.parseToJsonElement(result.config).jsonObject["route"]!!
+        Json.parseToJsonElement(result.configJson).jsonObject["route"]!!
             .jsonObject["rules"]!!
             .jsonArray
             .map { it.jsonObject }
 
     private fun parseDnsServers(result: ConfigBuildResult) =
-        Json.parseToJsonElement(result.config).jsonObject["dns"]!!
+        Json.parseToJsonElement(result.configJson).jsonObject["dns"]!!
             .jsonObject["servers"]!!
             .jsonArray
             .associateBy { it.jsonObject["tag"]!!.jsonPrimitive.content }
@@ -2324,7 +2739,7 @@ class ConfigBuilderTest : HusiKoinTest() {
     }
 
     private fun parseTunInbound(result: ConfigBuildResult) =
-        Json.parseToJsonElement(result.config).jsonObject["inbounds"]!!
+        Json.parseToJsonElement(result.configJson).jsonObject["inbounds"]!!
             .jsonArray
             .first { it.jsonObject["tag"]!!.jsonPrimitive.content == TAG_TUN }
             .jsonObject
