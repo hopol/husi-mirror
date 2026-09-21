@@ -150,7 +150,8 @@
         "com.jakewharton:process-phoenix",
         "org.ini4j:ini4j",
         "com.github.ajalt.clikt{/,}**",
-        "com.google.zxing{/,}**"
+        "com.google.zxing{/,}**",
+        "dev.chrisbanes.haze{/,}**"
       ],
       "groupName": "Utility Libraries",
       "groupSlug": "utility-libraries"
@@ -161,7 +162,8 @@
       ],
       "matchPackageNames": [
         "org.gradle.toolchains.foojay-resolver-convention",
-        "com.mikepenz{/,}**"
+        "com.mikepenz{/,}**",
+        "com.codingfeline.buildkonfig"
       ],
       "groupName": "Build Plugins & Tooling",
       "groupSlug": "build-plugins-tooling"

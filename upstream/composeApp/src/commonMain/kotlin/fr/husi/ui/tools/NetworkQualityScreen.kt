@@ -20,7 +20,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DropdownMenuPopup
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -44,12 +43,12 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import fr.husi.compose.CapsuleActionButton
 import fr.husi.compose.CapsuleTopBar
 import fr.husi.compose.SimpleIconButton
 import fr.husi.compose.TextButton
 import fr.husi.compose.material3.Button
 import fr.husi.compose.material3.Card
+import fr.husi.compose.material3.ScrollableDropdownMenuPopup
 import fr.husi.compose.material3.Icon
 import fr.husi.compose.material3.Text
 import fr.husi.compose.paddingExceptBottom
@@ -125,6 +124,7 @@ internal fun NetworkQualityScreen(
             .nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
             CapsuleTopBar(
+                hazeState = null,
                 navigationIcon = {
                     SimpleIconButton(
                         imageVector = vectorResource(Res.drawable.arrow_back),
@@ -141,7 +141,7 @@ internal fun NetworkQualityScreen(
                                 contentDescription = stringResource(Res.string.more),
                                 onClick = { expandMenu = true },
                             )
-                            DropdownMenuPopup(
+                            ScrollableDropdownMenuPopup(
                                 expanded = expandMenu,
                                 onDismissRequest = { expandMenu = false },
                             ) {

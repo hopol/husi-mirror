@@ -26,7 +26,6 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.DropdownMenuGroup
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.DropdownMenuPopup
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -58,8 +57,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.max
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.chrisbanes.haze.hazeSource
+import dev.chrisbanes.haze.rememberHazeState
 import fr.husi.compose.BoxedVerticalScrollbar
-import fr.husi.compose.CapsuleActionButton
 import fr.husi.compose.CapsuleSearchInputField
 import fr.husi.compose.CapsuleSearchTopBar
 import fr.husi.compose.SagerFabClearance
@@ -67,6 +67,7 @@ import fr.husi.compose.SheetActionRow
 import fr.husi.compose.SimpleIconButton
 import fr.husi.compose.ansiEscape
 import fr.husi.compose.fadingEdge
+import fr.husi.compose.material3.ScrollableDropdownMenuPopup
 import fr.husi.compose.material3.Icon
 import fr.husi.compose.material3.RadioButton
 import fr.husi.compose.material3.Text
@@ -167,6 +168,7 @@ fun LogcatScreen(
     }
 
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
+    val hazeState = rememberHazeState()
     val windowInsets = WindowInsets.safeDrawing
     val searchBarState = rememberSearchBarState()
     val searchTextFieldState = viewModel.searchTextFieldState
@@ -203,6 +205,7 @@ fun LogcatScreen(
         topBar = {
             Column {
                 CapsuleSearchTopBar(
+                    hazeState = hazeState,
                     inputField = searchInputField,
                     navigationIcon = null,
                     actions = {
@@ -246,7 +249,7 @@ fun LogcatScreen(
                                     contentDescription = stringResource(Res.string.more),
                                     onClick = { expandMenu = true },
                                 )
-                                DropdownMenuPopup(
+                                ScrollableDropdownMenuPopup(
                                     expanded = expandMenu,
                                     onDismissRequest = { expandMenu = false },
                                 ) {
@@ -320,7 +323,9 @@ fun LogcatScreen(
             bottom = max(innerPadding.calculateBottomPadding(), SagerFabClearance),
         )
         Box(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .hazeSource(hazeState),
         ) {
             Row(modifier = Modifier.fillMaxSize()) {
                 Box(

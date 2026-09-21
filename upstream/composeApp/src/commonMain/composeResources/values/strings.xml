@@ -312,6 +312,10 @@
     <string name="profile_config">Profile config</string>
     <string name="delete">Remove</string>
     <string name="delete_confirm_prompt">Are you sure you want to remove this profile?</string>
+    <plurals name="delete_profiles_confirm_prompt">
+        <item quantity="one">Are you sure you want to remove this profile?</item>
+        <item quantity="other">Are you sure you want to remove these %1$d profiles?</item>
+    </plurals>
     <string name="share_qr_nfc">QR code</string>
     <string name="add_profile_methods_scan_qr_code">Scan QR code</string>
     <string name="add_profile_methods_manual_settings">Manual Settings</string>
@@ -392,6 +396,8 @@
     <string name="connection_test_refused">Connection refused</string>
     <string name="connection_test_unreachable">Unreachable</string>
     <string name="connection_test_timeout">Timeout</string>
+    <string name="system_proxy">System proxy</string>
+    <string name="system_proxy_unavailable_inbound_auth">Unavailable while inbound username or password is set</string>
     <string name="append_http_proxy">Append HTTP Proxy to VPN</string>
     <string name="append_http_proxy_sum">HTTP proxy will be used directly from (browser/ some supported apps), without going through the virtual NIC device (Android 10+)</string>
     <string name="protocol_settings">Protocol Settings</string>
@@ -805,10 +811,6 @@
     <string name="connection_status_closed">Closed</string>
     <string name="can_not_be_empty">Cann\'t be empty</string>
     <string name="juicity_provider">Juicity Provider</string>
-    <plurals name="delete_confirm_detail">
-        <item quantity="one">Are you sure you want to remove this profile?\n\n%1$s</item>
-        <item quantity="other">Are you sure you want to remove these profiles?\n\n%1$s</item>
-    </plurals>
     <string name="action_format">Format</string>
     <string name="action_test_config">Test config</string>
     <string name="mutual_tls">Mutual TLS</string>
@@ -924,6 +926,8 @@
     <string name="app_update_shizuku_not_running">Shizuku is installed but not running</string>
     <string name="app_update_shizuku_unsupported">This Shizuku version is too old</string>
     <string name="app_update_shizuku_denied">Shizuku permission was denied</string>
+    <string name="app_update_install_permission">Allow installing apps</string>
+    <string name="app_update_install_permission_sum">Required to install updates with the system installer</string>
     <string name="app_update_check_now">Check for updates now</string>
     <string name="app_update_obtainium">Track in Obtainium</string>
     <string name="app_update_obtainium_sum">Hand the release source to the installed Obtainium</string>

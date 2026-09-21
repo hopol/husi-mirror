@@ -695,18 +695,11 @@ suspend fun buildConfig(
                     tag = TAG_MIXED
                     listen = bind
                     listen_port = mixedPort
-                    if (!PlatformInfo.isAndroid) {
-                        if (DataStore.appendHttpProxy.get()) {
-                            set_system_proxy = true
-                        }
-                    }
-                    val inboundUsername = DataStore.inboundUsername.get()
-                    val inboundPassword = DataStore.inboundPassword.get()
-                    if (inboundUsername.isNotBlank() || inboundPassword.isNotBlank()) {
+                    if (DataStore.hasInboundAuth()) {
                         users = mutableListOf(
                             User().apply {
-                                username = inboundUsername
-                                password = inboundPassword
+                                username = DataStore.inboundUsername.get()
+                                password = DataStore.inboundPassword.get()
                             },
                         )
                     }
@@ -794,7 +787,14 @@ suspend fun buildConfig(
             }
 
             val entriesWithContinuation = resolvedChain.links.mapTo(HashSet()) { it.from }
-            val alwaysReferenced = resolvedChain.alwaysReferencedKeys()
+            val alwaysReferenced = if (forTest) {
+                // `on_demand` == true fails fast when endpoint is not ready,
+                // while it == false waiting until endpoint is ready.
+                // So we disable it to make dialing await.
+                emptySet()
+            } else {
+                resolvedChain.alwaysReferencedKeys()
+            }
 
             // Resolve DNS for every actual dial target. A flattened iteration is ambiguous when
             // a selector contains several chains with independent exits.

@@ -1,10 +1,7 @@
 package fr.husi.core
 
 import fr.husi.ktx.emptyAsNull
-import fr.husi.libcore.Libcore
 import fr.husi.proto.daemon.Connection
-import fr.husi.proto.daemon.ConnectionEvent
-import fr.husi.proto.daemon.ConnectionEventType
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.format.char
@@ -12,7 +9,7 @@ import kotlinx.datetime.toLocalDateTime
 import kotlin.time.Instant
 
 /** "$name/$type" label composition previously done in Go generateBound. */
-fun formatBound(name: String, type: String): String {
+private fun formatBound(name: String, type: String): String {
     if (name.isEmpty()) return type
     if (type.isEmpty()) return name
     return "$name/$type"
@@ -22,16 +19,22 @@ fun Connection.inboundLabel(): String = formatBound(inbound, inboundType)
 
 fun Connection.outboundLabel(): String = formatBound(outbound, outboundType)
 
-/** Matched outbound is the last chain hop, else the direct outbound tag. */
+/**
+ * Hops in traffic order, matched outbound first, the hop that dials last.
+ * `chainList` runs from the dialing hop up to the matched outbound.
+ */
+fun Connection.chainHops(): List<String> = chainListList.asReversed()
+
+/** Matched outbound is the first chain hop, else the direct outbound tag. */
 fun Connection.matchedOutbound(): String =
-    chainListList.lastOrNull()?.takeIf { it.isNotEmpty() } ?: outbound
+    chainHops().firstOrNull()?.takeIf { it.isNotEmpty() } ?: outbound
 
 /** Rule text; unmatched falls back to "final" (D-P1.8). */
 fun Connection.matchedRuleOrFinal(): String =
     rule.ifEmpty { "final" }
 
 fun Connection.chainLabel(): String =
-    chainListList.joinToString(" => ")
+    chainHops().joinToString(" => ")
 
 /**
  * Formats a proto unix-millis timestamp as local `yyyy-MM-dd HH:mm:ss`, matching
@@ -58,17 +61,6 @@ private val CONNECTION_TIME_FORMAT = LocalDateTime.Format {
     char(':')
     second()
 }
-
-fun proxyDisplayName(type: String): String = Libcore.proxyDisplayName(type)
-
-fun ConnectionEvent.isNew(): Boolean =
-    type == ConnectionEventType.CONNECTION_EVENT_NEW
-
-fun ConnectionEvent.isUpdate(): Boolean =
-    type == ConnectionEventType.CONNECTION_EVENT_UPDATE
-
-fun ConnectionEvent.isClosed(): Boolean =
-    type == ConnectionEventType.CONNECTION_EVENT_CLOSED
 
 /** Process paths / package names used by the dashboard connection detail UI. */
 fun Connection.processNames(): List<String>? {

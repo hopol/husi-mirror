@@ -16,8 +16,6 @@ import fr.husi.bg.DefaultNetworkListener
 import fr.husi.bg.SpeedStats
 import fr.husi.core.CoreClient
 import fr.husi.core.formatConnectionTime
-import fr.husi.core.isNew
-import fr.husi.core.proxyDisplayName
 import fr.husi.core.remote.RemoteControlManager
 import fr.husi.core.urlTestOptions
 import fr.husi.database.DataStore
@@ -25,6 +23,8 @@ import fr.husi.fmt.SingBoxOptions
 import fr.husi.ktx.Logs
 import fr.husi.ktx.runOnDefaultDispatcher
 import fr.husi.ktx.runOnIoDispatcher
+import fr.husi.libcore.Libcore
+import fr.husi.platform.PlatformInfo
 import fr.husi.proto.daemon.ConnectionEvent
 import fr.husi.proto.daemon.ConnectionEventType
 import fr.husi.proto.daemon.ConnectionEvents
@@ -55,6 +55,13 @@ import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.DurationUnit
 
 @Immutable
+data class SystemProxyState(
+    val enabled: Boolean,
+    val mixedPort: Int,
+    val hasInboundAuth: Boolean,
+)
+
+@Immutable
 data class DashboardState(
     // toolbar
     val isPause: Boolean = false,
@@ -74,6 +81,7 @@ data class DashboardState(
     val ipv6: String? = null,
     val selectedClashMode: String = "",
     val clashModes: List<String> = emptyList(),
+    val systemProxy: SystemProxyState? = null,
     val networkInterfaces: List<NetworkInterfaceInfo> = emptyList(),
 
     val connections: List<ConnectionDetailState> = emptyList(),
@@ -272,6 +280,23 @@ class DashboardViewModel(
         viewModelScope.launch {
             remoteControl?.session?.collect { session ->
                 uiState.update { it.copy(isRemote = session != null) }
+            }
+        }
+        if (!PlatformInfo.isAndroid) {
+            viewModelScope.launch {
+                combine(
+                    DataStore.systemProxy.flow(),
+                    DataStore.mixedPort.flow(),
+                    DataStore.hasInboundAuthFlow(),
+                ) { enabled, mixedPort, hasInboundAuth ->
+                    SystemProxyState(
+                        enabled = enabled,
+                        mixedPort = mixedPort,
+                        hasInboundAuth = hasInboundAuth,
+                    )
+                }.collect { systemProxyState ->
+                    uiState.update { it.copy(systemProxy = systemProxyState) }
+                }
             }
         }
         viewModelScope.launch {
@@ -626,7 +651,9 @@ class DashboardViewModel(
             connections.clear()
             closedConnectionOrder.clear()
             for (event in events.eventsList) {
-                if (!event.isNew()) continue
+                if (event.type != ConnectionEventType.CONNECTION_EVENT_NEW) {
+                    continue
+                }
                 val connection = event.connection ?: continue
                 putConnection(event.id, connection.toDetailState())
             }
@@ -732,7 +759,7 @@ class DashboardViewModel(
             val fresh = latestGroups.map { group ->
                 ProxySet(
                     tag = group.tag,
-                    displayType = proxyDisplayName(group.type),
+                    displayType = Libcore.proxyDisplayName(group.type),
                     selectable = group.selectable,
                     selected = group.selected,
                     items = group.itemsList.map { item ->
@@ -740,7 +767,7 @@ class DashboardViewModel(
                             tag = item.tag,
                             type = item.type,
                             urlTestDelay = item.urlTestDelay,
-                            displayType = proxyDisplayName(item.type),
+                            displayType = Libcore.proxyDisplayName(item.type),
                         )
                     }.let { items ->
                         comparator?.let { items.sortedWith(it) } ?: items
@@ -752,7 +779,7 @@ class DashboardViewModel(
                     tag = item.tag,
                     type = item.type,
                     urlTestDelay = item.urlTestDelay,
-                    displayType = proxyDisplayName(item.type),
+                    displayType = Libcore.proxyDisplayName(item.type),
                 )
             }.let { items ->
                 comparator?.let { items.sortedWith(it) } ?: items
@@ -885,6 +912,10 @@ class DashboardViewModel(
         } catch (e: Exception) {
             Logs.w(e)
         }
+    }
+
+    fun setSystemProxyEnabled(enabled: Boolean) = runOnIoDispatcher {
+        DataStore.systemProxy.set(enabled)
     }
 }
 

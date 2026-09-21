@@ -173,6 +173,8 @@
     <string name="app_update_shizuku_not_running">Shizuku 已安裝但未執行</string>
     <string name="app_update_shizuku_unsupported">此 Shizuku 版本過舊</string>
     <string name="app_update_shizuku_denied">Shizuku 權限被拒絕</string>
+    <string name="app_update_install_permission">允許安裝應用程式</string>
+    <string name="app_update_install_permission_sum">使用系統安裝程式安裝更新時需要此權限</string>
     <string name="app_update_check_now">立即檢查更新</string>
     <string name="app_update_checking">檢查中…</string>
     <string name="app_update_never_checked">從未檢查</string>
@@ -187,4 +189,6 @@
     <string name="app_update_installing">安裝中…</string>
     <string name="app_update_install_failed">安裝失敗：%1$s</string>
     <string name="app_update_no_matching_asset">沒有與此裝置匹配的安裝套件。請開啟發布頁面手動下載。</string>
+    <string name="system_proxy">系統代理</string>
+    <string name="system_proxy_unavailable_inbound_auth">已設置入站用戶名或密碼，不可用</string>
 </resources>

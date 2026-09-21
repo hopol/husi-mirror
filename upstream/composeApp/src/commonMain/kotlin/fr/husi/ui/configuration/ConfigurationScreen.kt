@@ -2,11 +2,9 @@
 
 package fr.husi.ui.configuration
 
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -32,7 +30,6 @@ import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SearchBarValue
 import androidx.compose.material3.SnackbarResult
-import androidx.compose.material3.Surface
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberSearchBarState
 import androidx.compose.runtime.Composable
@@ -48,7 +45,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
@@ -57,7 +54,6 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastCoerceAtLeast
 import androidx.compose.ui.util.fastCoerceIn
@@ -73,11 +69,15 @@ import androidx.lifecycle.compose.rememberLifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.CreationExtras
 import androidx.lifecycle.viewmodel.compose.viewModel
-import fr.husi.compose.CapsuleActionButton
+import dev.chrisbanes.haze.hazeSource
+import dev.chrisbanes.haze.rememberHazeState
+import fr.husi.compose.CapsuleHeader
+import fr.husi.compose.paddingHorizontal
 import fr.husi.compose.ClipboardContent
 import fr.husi.compose.CapsuleSearchInputField
 import fr.husi.compose.CapsuleSearchTopBar
-import fr.husi.compose.ExpandableDropdownMenuItem
+import fr.husi.compose.DropdownMenuAction
+import fr.husi.compose.DropdownMenuActions
 import fr.husi.compose.QRCodeDialog
 import fr.husi.compose.SagerFabClearance
 import fr.husi.compose.ScrollableDialog
@@ -90,7 +90,6 @@ import fr.husi.compose.material3.Icon
 import fr.husi.compose.material3.PrimaryScrollableTabRow
 import fr.husi.compose.material3.Tab
 import fr.husi.compose.material3.Text
-import fr.husi.compose.paddingExceptBottom
 import fr.husi.database.DataStore
 import fr.husi.database.ProxyEntity
 import fr.husi.database.displayType
@@ -142,7 +141,7 @@ import fr.husi.resources.connection_test_unreachable
 import fr.husi.resources.connection_test_url_test
 import fr.husi.resources.copy_success
 import fr.husi.resources.custom_config
-import fr.husi.resources.delete_confirm_prompt
+import fr.husi.resources.delete_profiles_confirm_prompt
 import fr.husi.resources.ecg
 import fr.husi.resources.group_order_by_delay
 import fr.husi.resources.group_order_by_name
@@ -173,6 +172,7 @@ import io.github.vinceglb.filekit.dialogs.compose.rememberFilePickerLauncher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 import org.jetbrains.compose.resources.vectorResource
 import kotlin.reflect.KClass
@@ -295,16 +295,7 @@ fun ConfigurationScreen(
     val windowInsets = WindowInsets.safeDrawing
 
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
-    val topAppBarColors = TopAppBarDefaults.topAppBarColors()
-    val appBarContainerColor by animateColorAsState(
-        targetValue = lerp(
-            topAppBarColors.containerColor,
-            topAppBarColors.scrolledContainerColor,
-            scrollBehavior.state.overlappedFraction.fastCoerceIn(0f, 1f),
-        ),
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-        label = "appBarContainerColor",
-    )
+    val hazeState = rememberHazeState()
 
     LaunchedEffect(Unit) {
         vm.scrollToProxy(DataStore.selectedProxy.get())
@@ -425,16 +416,19 @@ fun ConfigurationScreen(
                 }
             },
         topBar = {
-            Surface(color = appBarContainerColor) {
-                Column {
-                    CapsuleSearchTopBar(
-                        inputField = searchInputField,
-                        navigationIcon = null,
-                        onSearchPillClick = {
-                            scope.launch { searchBarState.animateToExpanded() }
-                        },
-                        onSearchPillLongPress = ::scrollToSelectedProxyAcrossGroups,
-                        actions = {
+            CapsuleHeader(
+                hazeState = hazeState,
+                scrollBehavior = scrollBehavior,
+            ) {
+                CapsuleSearchTopBar(
+                    hazeState = hazeState,
+                    inputField = searchInputField,
+                    navigationIcon = null,
+                    onSearchPillClick = {
+                        scope.launch { searchBarState.animateToExpanded() }
+                    },
+                    onSearchPillLongPress = ::scrollToSelectedProxyAcrossGroups,
+                    actions = {
                         CapsuleActionButton {
                             SimpleIconButton(
                                 imageVector = vectorResource(Res.drawable.view_list),
@@ -455,27 +449,31 @@ fun ConfigurationScreen(
                                     containerColor = MenuDefaults.groupStandardContainerColor,
                                     shape = MenuDefaults.standaloneGroupShape,
                                 ) {
-                                    ScannerDropdownMenuItem()
-                                    DropdownMenuItem(
-                                        text = { Text(stringResource(Res.string.action_import)) },
-                                        onClick = {
-                                            showAddMenu = false
-                                            importFromClipboard()
-                                        },
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text(stringResource(Res.string.action_import_file)) },
-                                        onClick = {
-                                            showAddMenu = false
-                                            importFile.launch()
-                                        },
-                                    )
-                                    ExpandableDropdownMenuItem(
-                                        text = stringResource(Res.string.add_profile_methods_manual_settings),
-                                        onClick = {
-                                            showAddMenu = false
-                                            showAddManualMenu = true
-                                        },
+                                    DropdownMenuActions(
+                                        listOfNotNull(
+                                            scannerMenuAction(
+                                                onDismissMenu = { showAddMenu = false },
+                                            ),
+                                            DropdownMenuAction(
+                                                text = stringResource(Res.string.action_import),
+                                            ) {
+                                                showAddMenu = false
+                                                importFromClipboard()
+                                            },
+                                            DropdownMenuAction(
+                                                text = stringResource(Res.string.action_import_file),
+                                            ) {
+                                                showAddMenu = false
+                                                importFile.launch()
+                                            },
+                                            DropdownMenuAction(
+                                                text = stringResource(Res.string.add_profile_methods_manual_settings),
+                                                opensSubmenu = true,
+                                            ) {
+                                                showAddMenu = false
+                                                showAddManualMenu = true
+                                            },
+                                        ),
                                     )
                                 }
                                 DropdownMenu(
@@ -484,14 +482,13 @@ fun ConfigurationScreen(
                                     containerColor = MenuDefaults.groupStandardContainerColor,
                                     shape = MenuDefaults.standaloneGroupShape,
                                 ) {
-                                    manualProfileEntries.forEach { (title, type) ->
-                                        DropdownMenuItem(
-                                            text = { Text(stringResource(title)) },
-                                            onClick = {
+                                    DropdownMenuActions(
+                                        manualProfileEntries.map { (title, type) ->
+                                            DropdownMenuAction(text = stringResource(title)) {
                                                 openProfileEditor(type)
-                                            },
-                                        )
-                                    }
+                                            }
+                                        },
+                                    )
                                 }
                             }
                         }
@@ -509,28 +506,36 @@ fun ConfigurationScreen(
                                     containerColor = MenuDefaults.groupStandardContainerColor,
                                     shape = MenuDefaults.standaloneGroupShape,
                                 ) {
-                                    DropdownMenuItem(
-                                        text = { Text(stringResource(Res.string.clear_traffic_statistics)) },
-                                        onClick = {
-                                            showOverflowMenu = false
-                                            vm.clearTrafficStatistics(selectedGroup)
-                                        },
+                                    DropdownMenuActions(
+                                        listOf(
+                                            DropdownMenuAction(
+                                                text = stringResource(Res.string.clear_traffic_statistics),
+                                            ) {
+                                                showOverflowMenu = false
+                                                vm.clearTrafficStatistics(selectedGroup)
+                                            },
+                                            DropdownMenuAction(
+                                                text = stringResource(Res.string.remove_duplicate),
+                                            ) {
+                                                showOverflowMenu = false
+                                                vm.removeDuplicate(selectedGroup)
+                                            },
+                                            DropdownMenuAction(
+                                                text = stringResource(Res.string.connection_test),
+                                                opensSubmenu = true,
+                                            ) {
+                                                showOverflowMenu = false
+                                                showConnectionTestMenu = true
+                                            },
+                                            DropdownMenuAction(
+                                                text = stringResource(Res.string.sort_mode),
+                                                opensSubmenu = true,
+                                            ) {
+                                                showOverflowMenu = false
+                                                showOrderMenu = true
+                                            },
+                                        ),
                                     )
-                                    DropdownMenuItem(
-                                        text = { Text(stringResource(Res.string.remove_duplicate)) },
-                                        onClick = {
-                                            showOverflowMenu = false
-                                            vm.removeDuplicate(selectedGroup)
-                                        },
-                                    )
-                                    ExpandableDropdownMenuItem(stringResource(Res.string.connection_test)) {
-                                        showOverflowMenu = false
-                                        showConnectionTestMenu = true
-                                    }
-                                    ExpandableDropdownMenuItem(stringResource(Res.string.sort_mode)) {
-                                        showOverflowMenu = false
-                                        showOrderMenu = true
-                                    }
                                 }
                                 DropdownMenu(
                                     expanded = showConnectionTestMenu,
@@ -538,55 +543,54 @@ fun ConfigurationScreen(
                                     containerColor = MenuDefaults.groupStandardContainerColor,
                                     shape = MenuDefaults.standaloneGroupShape,
                                 ) {
-                                    DropdownMenuItem(
-                                        text = { Text(stringResource(Res.string.connection_test_icmp_ping)) },
-                                        onClick = {
-                                            showConnectionTestMenu = false
-                                            scope.launch {
-                                                vm.doTest(
-                                                    DataStore.currentGroupId(),
-                                                    TestType.ICMPPing,
-                                                )
-                                            }
-                                        },
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text(stringResource(Res.string.connection_test_tcp_ping)) },
-                                        onClick = {
-                                            showConnectionTestMenu = false
-                                            scope.launch {
-                                                vm.doTest(
-                                                    DataStore.currentGroupId(),
-                                                    TestType.TCPPing,
-                                                )
-                                            }
-                                        },
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text(stringResource(Res.string.connection_test_url_test)) },
-                                        onClick = {
-                                            showConnectionTestMenu = false
-                                            scope.launch {
-                                                vm.doTest(
-                                                    DataStore.currentGroupId(),
-                                                    TestType.URLTest,
-                                                )
-                                            }
-                                        },
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text(stringResource(Res.string.connection_test_delete_unavailable)) },
-                                        onClick = {
-                                            showConnectionTestMenu = false
-                                            vm.deleteUnavailable(selectedGroup)
-                                        },
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text(stringResource(Res.string.connection_test_clear_results)) },
-                                        onClick = {
-                                            showConnectionTestMenu = false
-                                            vm.clearResults(selectedGroup)
-                                        },
+                                    DropdownMenuActions(
+                                        listOf(
+                                            DropdownMenuAction(
+                                                text = stringResource(Res.string.connection_test_icmp_ping),
+                                            ) {
+                                                showConnectionTestMenu = false
+                                                scope.launch {
+                                                    vm.doTest(
+                                                        DataStore.currentGroupId(),
+                                                        TestType.ICMPPing,
+                                                    )
+                                                }
+                                            },
+                                            DropdownMenuAction(
+                                                text = stringResource(Res.string.connection_test_tcp_ping),
+                                            ) {
+                                                showConnectionTestMenu = false
+                                                scope.launch {
+                                                    vm.doTest(
+                                                        DataStore.currentGroupId(),
+                                                        TestType.TCPPing,
+                                                    )
+                                                }
+                                            },
+                                            DropdownMenuAction(
+                                                text = stringResource(Res.string.connection_test_url_test),
+                                            ) {
+                                                showConnectionTestMenu = false
+                                                scope.launch {
+                                                    vm.doTest(
+                                                        DataStore.currentGroupId(),
+                                                        TestType.URLTest,
+                                                    )
+                                                }
+                                            },
+                                            DropdownMenuAction(
+                                                text = stringResource(Res.string.connection_test_delete_unavailable),
+                                            ) {
+                                                showConnectionTestMenu = false
+                                                vm.deleteUnavailable(selectedGroup)
+                                            },
+                                            DropdownMenuAction(
+                                                text = stringResource(Res.string.connection_test_clear_results),
+                                            ) {
+                                                showConnectionTestMenu = false
+                                                vm.clearResults(selectedGroup)
+                                            },
+                                        ),
                                     )
                                 }
                                 DropdownMenu(
@@ -625,7 +629,7 @@ fun ConfigurationScreen(
                         uiState.groups.size - 1,
                     ),
                     edgePadding = 0.dp,
-                    containerColor = appBarContainerColor,
+                    containerColor = Color.Transparent,
                 ) {
                     uiState.groups.forEachIndexed { index, group ->
                         Tab(
@@ -649,20 +653,22 @@ fun ConfigurationScreen(
                     }
                 }
             }
-            }
         },
     ) { innerPadding ->
-        val bottomPadding = innerPadding.calculateBottomPadding() + SagerFabClearance
         ConfigurationContent(
             modifier = Modifier
                 .fillMaxSize()
-                .paddingExceptBottom(innerPadding),
+                .paddingHorizontal(innerPadding)
+                .hazeSource(hazeState),
             vm = vm,
             pagerState = pagerState,
             preSelected = null,
             showActions = true,
             onProfileSelect = vm::onProfileSelect,
-            bottomPadding = bottomPadding,
+            contentPadding = PaddingValues(
+                top = innerPadding.calculateTopPadding(),
+                bottom = innerPadding.calculateBottomPadding() + SagerFabClearance,
+            ),
             canHoldFocus = searchBarState.currentValue != SearchBarValue.Expanded,
             onOpenProfileEditor = onOpenProfileEditor,
         )
@@ -686,7 +692,7 @@ fun ConfigurationScreen(
                 modifier = Modifier.fillMaxSize(),
                 viewModel = childVm,
                 showActions = true,
-                bottomPadding = 0.dp,
+                contentPadding = PaddingValues(),
                 canHoldFocus = false,
                 onProfileSelect = { id ->
                     vm.onProfileSelect(id)
@@ -741,7 +747,7 @@ fun ConfigurationContent(
     preSelected: Long?,
     showActions: Boolean,
     onProfileSelect: (Long) -> Unit,
-    bottomPadding: Dp,
+    contentPadding: PaddingValues,
     canHoldFocus: Boolean,
     onOpenProfileEditor: ((NavRoutes.ProfileEditor) -> Unit)? = null,
 ) {
@@ -793,7 +799,7 @@ fun ConfigurationContent(
                     GroupHolderScreen(
                         viewModel = pageViewModel,
                         showActions = showActions,
-                        bottomPadding = bottomPadding,
+                        contentPadding = contentPadding,
                         canHoldFocus = canHoldFocus && pagerState.currentPage == page,
                         onProfileSelect = onProfileSelect,
                         onOpenProfileEditor = onOpenProfileEditor,
@@ -882,8 +888,9 @@ private fun ConfigurationDialogs(
             onDismissRequest = { vm.dismissAlert() },
             title = {
                 Text(
-                    stringResource(
-                        Res.string.delete_confirm_prompt,
+                    pluralStringResource(
+                        Res.plurals.delete_profiles_confirm_prompt,
+                        alert.size,
                         alert.size,
                     ),
                 )

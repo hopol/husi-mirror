@@ -126,6 +126,9 @@
     <string name="profile_config">設定檔設定</string>
     <string name="delete">刪除</string>
     <string name="delete_confirm_prompt">您確定要刪除此設定檔嗎？</string>
+    <plurals name="delete_profiles_confirm_prompt">
+        <item quantity="other">您確定要刪除這 %1$d 個設定檔嗎？</item>
+    </plurals>
     <string name="share_qr_nfc">QR 碼</string>
     <string name="add_profile_methods_scan_qr_code">掃描 QR 碼</string>
     <string name="add_profile_methods_manual_settings">手動設定</string>
@@ -301,6 +304,8 @@
     <string name="connection_test_refused">連線被拒</string>
     <string name="connection_test_unreachable">無法連線</string>
     <string name="connection_test_timeout">逾時</string>
+    <string name="system_proxy">系統代理</string>
+    <string name="system_proxy_unavailable_inbound_auth">已設定入站用戶名或密碼，無法使用</string>
     <string name="append_http_proxy">為 VPN 附加 HTTP 代理</string>
     <string name="append_http_proxy_sum">HTTP 代理將直接被支援的瀏覽器/應用程式使用，而無需經過虛擬網路卡（Android 10+）</string>
     <string name="trojan_provider">Trojan 提供程式</string>
@@ -677,9 +682,6 @@
     <string name="connection_status_closed">已關閉</string>
     <string name="can_not_be_empty">不可為空</string>
     <string name="juicity_provider">Juicity 提供程式</string>
-    <plurals name="delete_confirm_detail">
-        <item quantity="other">您確定要移除以下設定檔嗎？\n\n%1$s</item>
-    </plurals>
     <string name="action_format">格式化</string>
     <string name="action_test_config">測試設定</string>
     <string name="mutual_tls">雙向 TLS</string>
@@ -732,6 +734,8 @@
     <string name="app_update_shizuku_not_running">Shizuku 已安裝但未執行</string>
     <string name="app_update_shizuku_unsupported">此 Shizuku 版本過舊</string>
     <string name="app_update_shizuku_denied">Shizuku 權限被拒絕</string>
+    <string name="app_update_install_permission">允許安裝應用程式</string>
+    <string name="app_update_install_permission_sum">使用系統安裝程式安裝更新時需要此權限</string>
     <string name="app_update_check_now">立即檢查更新</string>
     <string name="app_update_checking">檢查中…</string>
     <string name="app_update_never_checked">從未檢查</string>

@@ -132,6 +132,9 @@
     <string name="profile_config">服务器配置</string>
     <string name="delete">删除</string>
     <string name="delete_confirm_prompt">您确定要删除这个服务器配置吗?</string>
+    <plurals name="delete_profiles_confirm_prompt">
+        <item quantity="other">您确定要删除这 %1$d 个服务器配置吗?</item>
+    </plurals>
     <string name="share_qr_nfc">二维码</string>
     <string name="add_profile_methods_scan_qr_code">扫描二维码</string>
     <string name="add_profile_methods_manual_settings">手动输入</string>
@@ -309,6 +312,8 @@
     <string name="connection_test_timeout">超时</string>
     <string name="connection_test_unreachable">不可达</string>
     <string name="tile_title">开关</string>
+    <string name="system_proxy">系统代理</string>
+    <string name="system_proxy_unavailable_inbound_auth">已设置入站用户名或密码，不可用</string>
     <string name="append_http_proxy">追加 HTTP 代理至 VPN</string>
     <string name="append_http_proxy_sum">浏览器 / 一些支持的应用 将直接使用 HTTP 代理, 而不经过虚拟网卡设备 (Android 10+)</string>
     <string name="connection_test_icmp_ping_unavailable">ICMPing 不可用</string>
@@ -715,9 +720,6 @@
     <string name="connection_status_closed">已关闭</string>
     <string name="can_not_be_empty">不能为空</string>
     <string name="juicity_provider">Juicity 提供程序</string>
-    <plurals name="delete_confirm_detail">
-        <item quantity="other">您确定要移除以下配置吗？\n\n%1$s</item>
-    </plurals>
     <string name="action_format">格式化</string>
     <string name="action_test_config">测试配置</string>
     <string name="mutual_tls">双向 TLS</string>
@@ -854,6 +856,8 @@
     <string name="app_update_shizuku_not_running">Shizuku 已安装但未运行</string>
     <string name="app_update_shizuku_unsupported">此 Shizuku 版本过旧</string>
     <string name="app_update_shizuku_denied">Shizuku 权限被拒绝</string>
+    <string name="app_update_install_permission">允许安装应用</string>
+    <string name="app_update_install_permission_sum">使用系统安装程序安装更新时需要此权限</string>
     <string name="app_update_check_now">立即检查更新</string>
     <string name="app_update_checking">检查中…</string>
     <string name="app_update_never_checked">从未检查</string>
