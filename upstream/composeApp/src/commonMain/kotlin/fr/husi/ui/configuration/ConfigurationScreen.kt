@@ -104,6 +104,7 @@ import fr.husi.resources.action_hysteria
 import fr.husi.resources.action_import
 import fr.husi.resources.action_import_file
 import fr.husi.resources.action_juicity
+import fr.husi.resources.action_masque
 import fr.husi.resources.action_mieru
 import fr.husi.resources.action_naive
 import fr.husi.resources.action_openconnect
@@ -164,10 +165,12 @@ import fr.husi.resources.search_go
 import fr.husi.resources.sort_mode
 import fr.husi.resources.undo
 import fr.husi.resources.view_list
+import fr.husi.results.ResultEffect
 import fr.husi.ui.LocalSnackbarEmitter
 import fr.husi.ui.MainViewModel
 import fr.husi.ui.NavRoutes
 import fr.husi.ui.StringOrRes
+import fr.husi.ui.profile.ProfileEditorResult
 import io.github.vinceglb.filekit.dialogs.compose.rememberFilePickerLauncher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -191,6 +194,20 @@ fun ConfigurationScreen(
     val clipboard = LocalClipboard.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val focusManager = LocalFocusManager.current
+
+    ResultEffect<ProfileEditorResult> { result ->
+        if (!result.updated) return@ResultEffect
+        if (result.profileId != DataStore.selectedProxy.get()) return@ResultEffect
+        if (!DataStore.serviceState.started) return@ResultEffect
+        snackbar.show(
+            StringOrRes.Res(Res.string.need_reload),
+            StringOrRes.Res(Res.string.apply),
+        ) { action ->
+            if (action == SnackbarResult.ActionPerformed) {
+                resolveRepository().reloadService()
+            }
+        }
+    }
 
     val importFile = rememberFilePickerLauncher { file ->
         if (file != null) {
@@ -320,6 +337,7 @@ fun ConfigurationScreen(
             Res.string.action_wireguard to ProxyEntity.TYPE_WG,
             Res.string.action_openconnect to ProxyEntity.TYPE_OPENCONNECT,
             Res.string.action_openvpn to ProxyEntity.TYPE_OPENVPN,
+            Res.string.action_masque to ProxyEntity.TYPE_MASQUE,
             Res.string.action_shadowtls to ProxyEntity.TYPE_SHADOWTLS,
             Res.string.action_anytls to ProxyEntity.TYPE_ANYTLS,
             Res.string.action_shadowquic to ProxyEntity.TYPE_SHADOWQUIC,
@@ -704,17 +722,6 @@ fun ConfigurationScreen(
                         callback(route)
                     }
                 },
-                needReload = {
-                    if (!DataStore.serviceState.started) return@GroupHolderScreen
-                    snackbar.show(
-                        StringOrRes.Res(Res.string.need_reload),
-                        StringOrRes.Res(Res.string.apply),
-                    ) { result ->
-                        if (result == SnackbarResult.ActionPerformed) {
-                            resolveRepository().reloadService()
-                        }
-                    }
-                },
                 showQR = { name, url ->
                     expandedScope.launch { searchBarState.animateToCollapsed() }
                     // QR dialog will be shown in the parent composition
@@ -803,17 +810,6 @@ fun ConfigurationContent(
                         canHoldFocus = canHoldFocus && pagerState.currentPage == page,
                         onProfileSelect = onProfileSelect,
                         onOpenProfileEditor = onOpenProfileEditor,
-                        needReload = {
-                            if (!DataStore.serviceState.started) return@GroupHolderScreen
-                            snackbar.show(
-                                StringOrRes.Res(Res.string.need_reload),
-                                StringOrRes.Res(Res.string.apply),
-                            ) { result ->
-                                if (result == SnackbarResult.ActionPerformed) {
-                                    resolveRepository().reloadService()
-                                }
-                            }
-                        },
                         showQR = { name, url ->
                             qrCodeInfo = name to url
                         },

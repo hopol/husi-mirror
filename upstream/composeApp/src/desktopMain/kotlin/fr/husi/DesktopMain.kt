@@ -5,12 +5,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.unit.DpSize
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.util.fastCoerceIn
-import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
-import androidx.compose.ui.window.rememberWindowState
+import androidx.compose.ui.window.v2.Window
+import androidx.compose.ui.window.v2.rememberWindowStateWithBounds
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.main
 import com.github.ajalt.clikt.core.obj
@@ -51,6 +50,7 @@ import fr.husi.repository.resolvePackagedAnjaNativesDir
 import fr.husi.resources.Res
 import fr.husi.resources.app_name
 import fr.husi.resources.ic_service_active
+import fr.husi.ui.AuthChallengeDialogs
 import fr.husi.ui.MainScreen
 import fr.husi.utils.CrashHandler
 import fr.husi.utils.copyBundledRuleSetAssetsIfNeeded
@@ -204,6 +204,7 @@ class DesktopMain(
         launchGui(emptyList())
     }
 
+    @OptIn(ExperimentalComposeUiApi::class)
     fun launchGui(deepLinks: List<String>) {
         taskId?.let {
             exitProcess(runTaskMode(it))
@@ -233,14 +234,17 @@ class DesktopMain(
                 mutableStateOf(!startInBackground)
             }
 
-            val windowState = rememberWindowState(size = DpSize(1200.dp, 800.dp))
+            val windowState = rememberWindowStateWithBounds(
+                initialSize = remember { initialWindowSize() },
+            )
+            RecordWindowSizeEffect(windowState)
 
             // The tray library keys its native rebuild on this reference, so a fresh lambda
             // every recomposition would re-render the icon and rebuild the menu each time.
             val openWindow: () -> Unit = remember(windowState) {
                 {
                     windowVisible = true
-                    windowState.isMinimized = false
+                    windowState.requestMinimized(false)
                 }
             }
 
@@ -287,6 +291,8 @@ class DesktopMain(
                         onExit = ::exitGracefully,
                     )
                 }
+
+                AuthChallengeDialogs(onDismissed = {})
 
                 Window(
                     onCloseRequest = leaveWindow,

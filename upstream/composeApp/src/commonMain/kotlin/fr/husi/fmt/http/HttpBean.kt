@@ -2,6 +2,7 @@ package fr.husi.fmt.http
 
 import kotlinx.serialization.Serializable as KxsSerializable
 import fr.husi.fmt.BeanConverters
+import fr.husi.fmt.HttpVersion
 import fr.husi.fmt.ValidateResult
 import fr.husi.fmt.v2ray.StandardV2RayBean
 import fr.husi.io.BinaryInput
@@ -11,6 +12,7 @@ import fr.husi.io.BinaryOutput
 class HttpBean : StandardV2RayBean() {
 
     companion object {
+
         @JvmField
         val CREATOR = object : CREATOR<HttpBean>() {
             override fun newInstance(): HttpBean {
@@ -25,7 +27,8 @@ class HttpBean : StandardV2RayBean() {
 
     var username: String = ""
     var password: String = ""
-    var udpOverTcp: Boolean = false
+    var httpVersion: Int = HttpVersion.HTTP_1
+    var disableVersionFallback: Boolean = false
 
     override fun isInsecure(): ValidateResult {
         val result = super.isInsecure()
@@ -34,8 +37,15 @@ class HttpBean : StandardV2RayBean() {
         return validateTLSSettings(requireTLS = true, warnAllowInsecure = false)
     }
 
+    override fun initializeDefaultValues() {
+        super.initializeDefaultValues()
+        if (!HttpVersion.isValid(httpVersion)) {
+            httpVersion = HttpVersion.HTTP_1
+        }
+    }
+
     override fun serialize(output: BinaryOutput) {
-        output.writeInt(2)
+        output.writeInt(3)
 
         // version 0
         super.serialize(output)
@@ -47,8 +57,9 @@ class HttpBean : StandardV2RayBean() {
         output.writeString(path)
         output.writeString(headers)
 
-        // version 2
-        output.writeBoolean(udpOverTcp)
+        // version 3
+        output.writeInt(httpVersion)
+        output.writeBoolean(disableVersionFallback)
     }
 
     override fun deserialize(input: BinaryInput) {
@@ -61,8 +72,12 @@ class HttpBean : StandardV2RayBean() {
             path = input.readString()
             headers = input.readString()
         }
-        if (version >= 2) {
-            udpOverTcp = input.readBoolean()
+        if (version == 2) {
+            input.readBoolean() // removed udpOverTcp
+        }
+        if (version >= 3) {
+            httpVersion = input.readInt()
+            disableVersionFallback = input.readBoolean()
         }
     }
 
@@ -71,5 +86,4 @@ class HttpBean : StandardV2RayBean() {
     }
 
     override val defaultPort get() = if (isTLS) 443 else 80
-    override val needUDPOverTCP get() = udpOverTcp
 }

@@ -250,6 +250,7 @@
     <string name="action_wireguard" translatable="false">WireGuard</string>
     <string name="action_openconnect" translatable="false">OpenConnect</string>
     <string name="action_openvpn" translatable="false">OpenVPN</string>
+    <string name="action_masque" translatable="false">MASQUE</string>
     <string name="openconnect_flavor">Flavor</string>
     <string name="openconnect_auth_group">Authentication Group</string>
     <string name="openconnect_reported_os">Reported OS</string>
@@ -592,6 +593,7 @@
     <string name="xtls_flow">Flow</string>
     <string name="need_restart">Restart APP to apply changes</string>
     <string name="protocol_version">Protocol Version</string>
+    <string name="disable_version_fallback">Disable Version Fallback</string>
     <string name="snell_user_key">User Key</string>
     <string name="snell_reuse">Reuse connection</string>
     <string name="snell_mode">Mode</string>
@@ -816,6 +818,7 @@
     <string name="mutual_tls">Mutual TLS</string>
     <string name="menu">Menu</string>
     <string name="cert_public_key_sha256">Certificate Public Key Sha256</string>
+    <string name="certificate_sha256">Certificate Sha256</string>
     <string name="format">Format</string>
     <string name="not_found">Not found</string>
     <string name="full">Full</string>
@@ -849,6 +852,10 @@
     <string name="ok">OK</string>
     <string name="cancel">Cancel</string>
     <string name="search_go">Search</string>
+    <string name="search_outbounds">Search outbounds</string>
+    <string name="search_proxy_sets">Search proxy sets</string>
+    <string name="switch_search_mode">Switch search mode</string>
+    <string name="no_results">No results</string>
 
     <string name="remote_control">Remote control</string>
     <string name="remote_server_add">Add server</string>
@@ -878,6 +885,8 @@
     <string name="exit">Exit</string>
     <string name="tun_strict_route">Tun strict route</string>
     <string name="tun_auto_redirect">Tun auto redirect</string>
+    <string name="remember_window_size">Remember window size</string>
+    <string name="remember_window_size_summary">Restore the main window to the size it had when last closed</string>
     <string name="no_plugin_found">No plugin found!</string>
     <string name="plugin_not_installed">Not installed</string>
     <string name="plugin_not_installed_summary">Tap to open the download page</string>

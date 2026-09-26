@@ -26,6 +26,7 @@ import fr.husi.fmt.SingBoxOptions.V2RayTransportOptions_V2RayWebsocketOptions
 import fr.husi.fmt.buildHeader
 import fr.husi.fmt.buildSingBoxMux
 import fr.husi.fmt.http.HttpBean
+import fr.husi.fmt.http.buildRequestTarget
 import fr.husi.fmt.listable
 import fr.husi.fmt.parseBoxOutbound
 import fr.husi.fmt.parseBoxTLS
@@ -500,6 +501,10 @@ fun buildSingBoxOutboundTLS(bean: StandardV2RayBean): OutboundTLSOptions? {
         if (bean.sni.isNotBlank()) server_name = bean.sni
         alpn = bean.alpn.blankAsNull()?.listByLineOrComma()?.toMutableList()
         certificate = bean.certificates.blankAsNull()?.lines()?.toMutableList()
+        certificate_sha256 = bean.certificateSha256
+            .blankAsNull()
+            ?.lines()
+            ?.toMutableList()
         certificate_public_key_sha256 = bean.certPublicKeySha256
             .blankAsNull()
             ?.lines()
@@ -547,10 +552,13 @@ suspend fun buildSingBoxOutboundStandardV2RayBean(bean: StandardV2RayBean): Outb
         server_port = bean.serverPort
         username = bean.username
         password = bean.password
-        path = bean.path
+        version = bean.httpVersion
+        disable_version_fallback = bean.disableVersionFallback
         tls = buildSingBoxOutboundTLS(bean)
 
-        headers = bean.headers.blankAsNull()?.let(::buildHeader)?.toMutableMap()
+        val requestTarget = bean.buildRequestTarget()
+        path = requestTarget.path
+        headers = requestTarget.headers
     }
 
     is VMessBean -> Outbound_VMessOptions().apply {
@@ -699,6 +707,7 @@ fun parseStandardV2RayOutbound(json: JSONMap): StandardV2RayBean {
                 bean.disableSNI = tls.disable_sni == true
                 bean.alpn = tls.alpn?.joinToString(",").orEmpty()
                 bean.certificates = tls.certificate?.joinToString("\n").orEmpty()
+                bean.certificateSha256 = tls.certificate_sha256?.joinToString("\n").orEmpty()
                 bean.certPublicKeySha256 =
                     tls.certificate_public_key_sha256?.joinToString("\n").orEmpty()
                 bean.clientCert = tls.client_certificate?.joinToString("\n").orEmpty()

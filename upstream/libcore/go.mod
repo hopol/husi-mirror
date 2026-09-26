@@ -1,38 +1,6 @@
 module github.com/xchacha20-poly1305/husi/libcore/v2
 
-go 1.26.0
-
-require (
-	filippo.io/age v1.3.2
-	github.com/coder/websocket v1.8.15
-	github.com/exclavenetwork/sing-juicity v0.3.1-0.20260904153201-e6f55d83049c
-	github.com/godbus/dbus/v5 v5.2.2
-	github.com/gofrs/uuid/v5 v5.5.1
-	github.com/klauspost/compress v1.20.0
-	github.com/miekg/dns v1.1.72
-	github.com/sagernet/cors v1.2.1
-	github.com/sagernet/quic-go v0.61.0-sing-box-mod.7
-	github.com/sagernet/sing v0.9.5-0.20260917164122-8fc5da509c10
-	github.com/sagernet/sing-anytls v0.0.0-20260904135308-cec2d74334be
-	github.com/sagernet/sing-box v1.15.0-alpha.6
-	github.com/sagernet/sing-mux v0.3.7-0.20260905054442-91d1502591ce
-	github.com/sagernet/sing-quic v0.7.1-0.20260904135313-497364e8ee3e
-	github.com/sagernet/sing-snell v0.0.0-20260904135315-bc5a12ac736f
-	github.com/sagernet/sing-tun v0.9.4-0.20260917142847-fbc0c3dff312
-	github.com/sagernet/sing-vmess v0.2.8
-	github.com/stretchr/testify v1.12.1
-	github.com/tailscale/go-winio v0.0.0-20231025203758-c4f33415bf55
-	github.com/xchacha20-poly1305/TLS-scribe v0.13.0
-	github.com/xchacha20-poly1305/anchor v0.8.0
-	github.com/xchacha20-poly1305/anja v0.22.16
-	github.com/xchacha20-poly1305/libping v0.10.5
-	github.com/xchacha20-poly1305/sing-trusttunnel v0.3.3-0.20260906073641-f530c1610baa
-	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba
-	golang.org/x/net v0.59.0
-	golang.org/x/sys v0.48.0
-	google.golang.org/grpc v1.83.2
-	google.golang.org/protobuf v1.36.12
-)
+go 1.27
 
 tool (
 	github.com/xchacha20-poly1305/anja/cmd/anja
@@ -47,12 +15,40 @@ replace (
 // github.com/sagernet/sing-box => ../../sing-box
 )
 
-// cmd
 require (
+	filippo.io/age v1.3.2
+	github.com/coder/websocket v1.8.15
+	github.com/exclavenetwork/sing-juicity v0.3.1-0.20260904153201-e6f55d83049c
+	github.com/godbus/dbus/v5 v5.2.2
+	github.com/gofrs/uuid/v5 v5.5.1
 	github.com/google/licensecheck v0.3.1
+	github.com/klauspost/compress v1.20.0
+	github.com/miekg/dns v1.1.72
 	github.com/oschwald/geoip2-golang v1.13.0
 	github.com/oschwald/maxminddb-golang v1.13.1
+	github.com/sagernet/cors v1.2.1
+	github.com/sagernet/quic-go v0.61.0-sing-box-mod.7
+	github.com/sagernet/sing v0.9.6-0.20260922013359-4ca3bebe0b8e
+	github.com/sagernet/sing-anytls v0.0.0-20260924021732-7ca72921ac6a
+	github.com/sagernet/sing-box v1.15.0-alpha.8
+	github.com/sagernet/sing-mux v0.3.9-0.20260919141002-baf887b90a62
+	github.com/sagernet/sing-quic v0.7.1-0.20260924092235-4f371c86a365
+	github.com/sagernet/sing-snell v0.0.0-20260904135315-bc5a12ac736f
+	github.com/sagernet/sing-tun v0.9.6-0.20260924073434-3077c705bbdb
+	github.com/sagernet/sing-vmess v0.2.8
+	github.com/stretchr/testify v1.12.1
+	github.com/tailscale/go-winio v0.0.0-20231025203758-c4f33415bf55
+	github.com/xchacha20-poly1305/TLS-scribe v0.13.0
+	github.com/xchacha20-poly1305/anchor v0.8.0
+	github.com/xchacha20-poly1305/anja v0.22.16
+	github.com/xchacha20-poly1305/libping v0.10.5
+	github.com/xchacha20-poly1305/sing-trusttunnel v0.3.3-0.20260921143651-7d7bb4e10cda
+	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba
 	golang.org/x/mod v0.41.0
+	golang.org/x/net v0.59.0
+	golang.org/x/sys v0.48.0
+	google.golang.org/grpc v1.83.2
+	google.golang.org/protobuf v1.36.12
 )
 
 require (

@@ -166,8 +166,7 @@ var outboundList = []any{
 	option.SelectorOutboundOptions{},
 	option.URLTestOutboundOptions{},
 	option.SOCKSOutboundOptions{},
-	// option.HTTPOutboundOptions{},
-	pluginoption.HTTPOutboundOptions{},
+	option.HTTPOutboundOptions{},
 	option.SSHOutboundOptions{},
 	option.TrojanOutboundOptions{},
 	option.HysteriaOutboundOptions{},
@@ -189,6 +188,7 @@ var endpointList = []any{
 	option.WireGuardEndpointOptions{},
 	option.OpenConnectEndpointOptions{},
 	option.OpenVPNClientEndpointOptions{},
+	option.MASQUEClientEndpointOptions{},
 }
 
 var serviceList = []any{

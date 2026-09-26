@@ -94,6 +94,11 @@ import org.jetbrains.compose.resources.stringResource
 import org.jetbrains.compose.resources.vectorResource
 import kotlin.random.Random
 
+data class ProfileEditorResult(
+    val profileId: Long,
+    val updated: Boolean,
+)
+
 @Composable
 fun ProfileEditorScreen(
     type: Int,
@@ -221,6 +226,13 @@ fun ProfileEditorScreen(
         )
 
         ProxyEntity.TYPE_OPENVPN -> OpenVPNSettingsScreen(
+            profileId = profileId,
+            isSubscription = isSubscription,
+            onResult = onResult,
+            onOpenConfigEditor = onOpenConfigEditor,
+        )
+
+        ProxyEntity.TYPE_MASQUE -> MASQUESettingsScreen(
             profileId = profileId,
             isSubscription = isSubscription,
             onResult = onResult,
@@ -567,7 +579,9 @@ private fun <T : AbstractBean> ProfileSettingsMainColumn(
             }
 
             BoxedVerticalScrollbar(
-                modifier = Modifier.fillMaxHeight(),
+                modifier = Modifier
+                    .padding(contentPadding)
+                    .fillMaxHeight(),
                 adapter = rememberScrollbarAdapter(scrollState = listState),
                 style = defaultMaterialScrollbarStyle().copy(
                     thickness = 12.dp,

@@ -16,6 +16,8 @@ wrong.
 | Instead of                                     | Run                     |
 |------------------------------------------------|-------------------------|
 | `./gradlew :composeApp:allTests` / `:desktopTest` | `make test_gradle`      |
+| `:composeApp:compileKotlinDesktop` (compile check) | `make test_gradle`      |
+| `:composeApp:compileAndroidMain` (compile check)   | `make apk_debug`        |
 | `cd libcore && go test ./...`                  | `make test_go`          |
 | `golangci-lint run` (per GOOS)                 | `make lint_go`          |
 | `golangci-lint fmt`                            | `make fmt_go`           |
@@ -26,6 +28,18 @@ Reach for `./gradlew` only for something no target expresses, and only in the fo
 already documents, such as running one test class:
 `./gradlew :composeApp:desktopTest --tests fr.husi.SomeTest`.
 
+## Read the matching skill before editing
+
+The `husi-*` skills in `.agents/skills/` record UI and testing conventions that the code alone
+does not show. Invoke the matching skill before the first edit, not after the change is written:
+
+| Before touching                                                              | Skill                        |
+|------------------------------------------------------------------------------|------------------------------|
+| `Scaffold`, `topBar`, `CapsuleTopBar`, tabs / `Tab` rows, search bars, Haze   | `husi-topbar`                |
+| `DropdownMenuPopup` or a `more_vert` menu in topbar `actions`                 | `husi-actions-dropdown-menu` |
+| Settings or profile-editor preference rows, `preferenceGroup`, `MaskedIcon`   | `husi-preference-ui`         |
+| Anything under `commonTest/` or `desktopTest/`, or a DI seam for testability  | `husi-testing`               |
+
 ## Cloud work
 
 If the skills start with `husi-` isn't visible, run this command to get an overview:
@@ -34,7 +48,3 @@ If the skills start with `husi-` isn't visible, run this command to get an overv
 grep -r description .agents/skills/ --include="SKILL.md"
 ```
 
-## Document
-
-If you belongs to Claude 5 model family, **do not write any comment or document** expect AGENTS.md or CLAUDE.md. If it is a must, please call `claude-sonnet-4-6` (You should write the full model name instead of `sonnet`, which links to later version of sonnet.) via subagent.
-You can only tell your subagent the overview, and can't give them the full comment because Claude whose version greater than 5 has poor language expression.
