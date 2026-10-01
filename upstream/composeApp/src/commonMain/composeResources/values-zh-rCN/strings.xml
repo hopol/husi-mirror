@@ -719,6 +719,11 @@
     <string name="connection_status">连接状态</string>
     <string name="connection_status_active">活跃中</string>
     <string name="connection_status_closed">已关闭</string>
+    <string name="connection_empty_all">暂无连接</string>
+    <string name="connection_empty_active">暂无活动连接</string>
+    <string name="connection_empty_closed">暂无已关闭连接</string>
+    <string name="connection_empty_search">没有匹配的连接</string>
+    <string name="connection_empty_no_status">未选择连接状态</string>
     <string name="can_not_be_empty">不能为空</string>
     <string name="juicity_provider">Juicity 提供程序</string>
     <string name="action_format">格式化</string>
@@ -844,7 +849,8 @@
     <string name="remote_target_local">本机</string>
     <string name="remote_target_manage">管理服务器…</string>
     <string name="remote_empty">还没有远程服务器</string>
-    <string name="remote_reconnecting">正在重连…</string>
+    <string name="remote_connect_failed">无法连接到 %1$s</string>
+    <string name="remote_disconnected_from">已与 %1$s 断开连接</string>
     <string name="remote_disconnect">断开</string>
     <string name="remote_test_success">已连接到 %1$s</string>
     <string name="remote_uptime">已运行 %1$s</string>
