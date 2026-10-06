@@ -91,10 +91,10 @@ import fr.husi.ktx.serverAddressDomainStrategy
 import fr.husi.ktx.showToast
 import fr.husi.ktx.toJsonElementKxs
 import fr.husi.ktx.toJsonMapKxs
-import fr.husi.libcore.Libcore
 import fr.husi.logLevelString
 import fr.husi.platform.PlatformInfo
 import fr.husi.repository.resolveRepository
+import io.github.xchacha20_poly1305.kpuri.Url
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.JsonPrimitive
 
@@ -220,8 +220,22 @@ class ConfigMetadata(
     val trafficProfiles: List<ProxyEntity>,
     val tagToID: Map<String, Long>,
     val trafficGraph: Map<String, TrafficNode> = emptyMap(),
+    val ruleApps: RuleApps = RuleApps(),
 ) {
     data class IndexEntity(val chain: LinkedHashMap<Int, ProxyEntity>)
+}
+
+data class RuleApps(
+    val packageNames: Set<String> = emptySet(),
+    val packageNameRegexes: List<String> = emptyList(),
+)
+
+private fun RuleEntity.routesDirect(): Boolean = when (action) {
+    "", SingBoxOptions.ACTION_ROUTE, SingBoxOptions.ACTION_BYPASS -> {
+        outbound == RuleEntity.OUTBOUND_DIRECT
+    }
+
+    else -> false
 }
 
 data class TrafficNode(
@@ -258,6 +272,8 @@ suspend fun buildConfig(
     val rootTagMap = HashMap<Long, String>()
     val tagToID = HashMap<String, Long>()
     val trafficGraph = HashMap<String, TrafficNode>()
+    val ruleAppPackageNames = LinkedHashSet<String>()
+    val ruleAppPackageNameRegexes = mutableListOf<String>()
     val optionsToMerge = proxy.requireBean().customConfigJson
 
     data class ChainEntryKey(val entityId: Long, val referencePath: List<Long>)
@@ -500,7 +516,7 @@ suspend fun buildConfig(
             ).associateBy { it.id }
         }
     val userDNSRuleList = mutableListOf<JSONMap>()
-    val bypassDNSProfiles = mutableListOf<ProxyEntity>()
+    val serverDomainProfiles = mutableListOf<ProxyEntity>()
     val isVPN = DataStore.serviceMode.get() == Key.MODE_VPN
     val allowAccess = DataStore.allowAccess.get()
     val bind = if (!forTest && allowAccess) {
@@ -546,6 +562,7 @@ suspend fun buildConfig(
             }
         }
     }
+
     val mDNSInterfaces = DataStore.mDNS.get()
         .blankAsNull()
         ?.listByLineOrComma()
@@ -996,9 +1013,9 @@ suspend fun buildConfig(
                 }
             }
 
-            // Keep terminal profiles available for the bypass lookup pass below.
+            // Keep terminal profiles available for the server domain pre-resolve pass below.
             for (exit in resolvedChain.exits) {
-                profileEntriesByKey[exit.key]?.entity?.let(bypassDNSProfiles::add)
+                profileEntriesByKey[exit.key]?.entity?.let(serverDomainProfiles::add)
             }
 
             for (link in resolvedChain.links) {
@@ -1063,6 +1080,11 @@ suspend fun buildConfig(
                 rule.packages,
                 defaultToPackage = PlatformInfo.isAndroid,
             )
+            val packageNameRegexes = rule.packageNameRegex.blankAsNull()?.split("\n").orEmpty()
+            if (!rule.invert && !rule.routesDirect()) {
+                ruleAppPackageNames.addAll(packageNames)
+                ruleAppPackageNameRegexes.addAll(packageNameRegexes)
+            }
 
             val ruleObj = Rule_Default().apply {
                 action = SingBoxOptions.ACTION_ROUTE
@@ -1072,9 +1094,8 @@ suspend fun buildConfig(
                 if (packageNames.isNotEmpty()) {
                     package_name = packageNames.toMutableList()
                 }
-                rule.packageNameRegex.blankAsNull()?.let {
-                    // Do not use listByLineOrComma for regex
-                    package_name_regex = it.split("\n").toMutableList()
+                if (packageNameRegexes.isNotEmpty()) {
+                    package_name_regex = packageNameRegexes.toMutableList()
                 }
                 if (processRules.isNotEmpty()) {
                     makeProcessRule(processRules)
@@ -1170,8 +1191,8 @@ suspend fun buildConfig(
                         invert = true
                     }
                     if (packageNames.isNotEmpty()) package_name = packageNames.toMutableList()
-                    rule.packageNameRegex.blankAsNull()?.let {
-                        package_name_regex = mutableListOf(it)
+                    if (packageNameRegexes.isNotEmpty()) {
+                        package_name_regex = packageNameRegexes.toMutableList()
                     }
                     if (processRules.isNotEmpty()) {
                         makeProcessRule(processRules)
@@ -1458,8 +1479,8 @@ suspend fun buildConfig(
             )
         }
 
-        // Bypass lookup for the terminal profiles in each expanded graph.
-        bypassDNSProfiles.forEach(::addServerDomains)
+        // Pre-resolve server domains of the terminal profiles in each expanded graph.
+        serverDomainProfiles.forEach(::addServerDomains)
 
         remoteDns.forEach {
             var address = it
@@ -1467,7 +1488,7 @@ suspend fun buildConfig(
                 address = address.substringAfter("://")
             }
             try {
-                Libcore.parseURL("https://$address").apply {
+                Url.parse("https://$address").host?.let { host ->
                     if (!host.isIpAddress()) {
                         preResolveDomains.add(host)
                     }
@@ -1758,6 +1779,7 @@ suspend fun buildConfig(
                 trafficProfiles = trafficProfiles.values.toList(),
                 tagToID = tagToID,
                 trafficGraph = trafficGraph,
+                ruleApps = RuleApps(ruleAppPackageNames, ruleAppPackageNameRegexes),
             ),
         )
     }

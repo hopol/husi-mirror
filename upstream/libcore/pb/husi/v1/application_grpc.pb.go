@@ -21,11 +21,13 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	ApplicationService_CheckConfig_FullMethodName                  = "/husi.v1.ApplicationService/CheckConfig"
+	ApplicationService_FormatConfig_FullMethodName                 = "/husi.v1.ApplicationService/FormatConfig"
 	ApplicationService_GenerateSchema_FullMethodName               = "/husi.v1.ApplicationService/GenerateSchema"
 	ApplicationService_StandaloneURLTest_FullMethodName            = "/husi.v1.ApplicationService/StandaloneURLTest"
 	ApplicationService_GetCert_FullMethodName                      = "/husi.v1.ApplicationService/GetCert"
 	ApplicationService_StandaloneSTUNTest_FullMethodName           = "/husi.v1.ApplicationService/StandaloneSTUNTest"
 	ApplicationService_StandaloneNetworkQualityTest_FullMethodName = "/husi.v1.ApplicationService/StandaloneNetworkQualityTest"
+	ApplicationService_HTTPFetch_FullMethodName                    = "/husi.v1.ApplicationService/HTTPFetch"
 )
 
 // ApplicationServiceClient is the client API for ApplicationService service.
@@ -46,6 +48,11 @@ const (
 // they share the host's protocol registry, socks path and cancellation model —
 // same placement as StandaloneURLTest (D6).
 //
+// HTTPFetch is the desktop half of the HTTP client husi uses for its own
+// downloads (subscriptions, rule sets, app updates); Android calls the same Go
+// code in-process through the libcore binding. It runs here so the desktop UI
+// needs no Go runtime of its own.
+//
 // The standalone STUN and network quality tests are the no-running-service half
 // of sing-box's pair: with a service started the UI calls
 // daemon.StartedService, which routes through a chosen outbound; with none it
@@ -53,11 +60,13 @@ const (
 // sing-box's own, so the two halves differ only in where the dialer comes from.
 type ApplicationServiceClient interface {
 	CheckConfig(ctx context.Context, in *CheckConfigRequest, opts ...grpc.CallOption) (*CheckConfigResponse, error)
+	FormatConfig(ctx context.Context, in *FormatConfigRequest, opts ...grpc.CallOption) (*FormatConfigResponse, error)
 	GenerateSchema(ctx context.Context, in *GenerateSchemaRequest, opts ...grpc.CallOption) (*GenerateSchemaResponse, error)
 	StandaloneURLTest(ctx context.Context, in *StandaloneURLTestRequest, opts ...grpc.CallOption) (*StandaloneURLTestResponse, error)
 	GetCert(ctx context.Context, in *GetCertRequest, opts ...grpc.CallOption) (*GetCertResponse, error)
 	StandaloneSTUNTest(ctx context.Context, in *StandaloneSTUNTestRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[daemon.STUNTestProgress], error)
 	StandaloneNetworkQualityTest(ctx context.Context, in *StandaloneNetworkQualityTestRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[daemon.NetworkQualityTestProgress], error)
+	HTTPFetch(ctx context.Context, in *HTTPFetchRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[HTTPFetchResponse], error)
 }
 
 type applicationServiceClient struct {
@@ -72,6 +81,16 @@ func (c *applicationServiceClient) CheckConfig(ctx context.Context, in *CheckCon
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CheckConfigResponse)
 	err := c.cc.Invoke(ctx, ApplicationService_CheckConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *applicationServiceClient) FormatConfig(ctx context.Context, in *FormatConfigRequest, opts ...grpc.CallOption) (*FormatConfigResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FormatConfigResponse)
+	err := c.cc.Invoke(ctx, ApplicationService_FormatConfig_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -146,6 +165,25 @@ func (c *applicationServiceClient) StandaloneNetworkQualityTest(ctx context.Cont
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type ApplicationService_StandaloneNetworkQualityTestClient = grpc.ServerStreamingClient[daemon.NetworkQualityTestProgress]
 
+func (c *applicationServiceClient) HTTPFetch(ctx context.Context, in *HTTPFetchRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[HTTPFetchResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &ApplicationService_ServiceDesc.Streams[2], ApplicationService_HTTPFetch_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[HTTPFetchRequest, HTTPFetchResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ApplicationService_HTTPFetchClient = grpc.ServerStreamingClient[HTTPFetchResponse]
+
 // ApplicationServiceServer is the server API for ApplicationService service.
 // All implementations must embed UnimplementedApplicationServiceServer
 // for forward compatibility.
@@ -164,6 +202,11 @@ type ApplicationService_StandaloneNetworkQualityTestClient = grpc.ServerStreamin
 // they share the host's protocol registry, socks path and cancellation model —
 // same placement as StandaloneURLTest (D6).
 //
+// HTTPFetch is the desktop half of the HTTP client husi uses for its own
+// downloads (subscriptions, rule sets, app updates); Android calls the same Go
+// code in-process through the libcore binding. It runs here so the desktop UI
+// needs no Go runtime of its own.
+//
 // The standalone STUN and network quality tests are the no-running-service half
 // of sing-box's pair: with a service started the UI calls
 // daemon.StartedService, which routes through a chosen outbound; with none it
@@ -171,11 +214,13 @@ type ApplicationService_StandaloneNetworkQualityTestClient = grpc.ServerStreamin
 // sing-box's own, so the two halves differ only in where the dialer comes from.
 type ApplicationServiceServer interface {
 	CheckConfig(context.Context, *CheckConfigRequest) (*CheckConfigResponse, error)
+	FormatConfig(context.Context, *FormatConfigRequest) (*FormatConfigResponse, error)
 	GenerateSchema(context.Context, *GenerateSchemaRequest) (*GenerateSchemaResponse, error)
 	StandaloneURLTest(context.Context, *StandaloneURLTestRequest) (*StandaloneURLTestResponse, error)
 	GetCert(context.Context, *GetCertRequest) (*GetCertResponse, error)
 	StandaloneSTUNTest(*StandaloneSTUNTestRequest, grpc.ServerStreamingServer[daemon.STUNTestProgress]) error
 	StandaloneNetworkQualityTest(*StandaloneNetworkQualityTestRequest, grpc.ServerStreamingServer[daemon.NetworkQualityTestProgress]) error
+	HTTPFetch(*HTTPFetchRequest, grpc.ServerStreamingServer[HTTPFetchResponse]) error
 	mustEmbedUnimplementedApplicationServiceServer()
 }
 
@@ -188,6 +233,9 @@ type UnimplementedApplicationServiceServer struct{}
 
 func (UnimplementedApplicationServiceServer) CheckConfig(context.Context, *CheckConfigRequest) (*CheckConfigResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CheckConfig not implemented")
+}
+func (UnimplementedApplicationServiceServer) FormatConfig(context.Context, *FormatConfigRequest) (*FormatConfigResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method FormatConfig not implemented")
 }
 func (UnimplementedApplicationServiceServer) GenerateSchema(context.Context, *GenerateSchemaRequest) (*GenerateSchemaResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GenerateSchema not implemented")
@@ -203,6 +251,9 @@ func (UnimplementedApplicationServiceServer) StandaloneSTUNTest(*StandaloneSTUNT
 }
 func (UnimplementedApplicationServiceServer) StandaloneNetworkQualityTest(*StandaloneNetworkQualityTestRequest, grpc.ServerStreamingServer[daemon.NetworkQualityTestProgress]) error {
 	return status.Error(codes.Unimplemented, "method StandaloneNetworkQualityTest not implemented")
+}
+func (UnimplementedApplicationServiceServer) HTTPFetch(*HTTPFetchRequest, grpc.ServerStreamingServer[HTTPFetchResponse]) error {
+	return status.Error(codes.Unimplemented, "method HTTPFetch not implemented")
 }
 func (UnimplementedApplicationServiceServer) mustEmbedUnimplementedApplicationServiceServer() {}
 func (UnimplementedApplicationServiceServer) testEmbeddedByValue()                            {}
@@ -239,6 +290,24 @@ func _ApplicationService_CheckConfig_Handler(srv interface{}, ctx context.Contex
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ApplicationServiceServer).CheckConfig(ctx, req.(*CheckConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ApplicationService_FormatConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FormatConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ApplicationServiceServer).FormatConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ApplicationService_FormatConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ApplicationServiceServer).FormatConfig(ctx, req.(*FormatConfigRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -319,6 +388,17 @@ func _ApplicationService_StandaloneNetworkQualityTest_Handler(srv interface{}, s
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type ApplicationService_StandaloneNetworkQualityTestServer = grpc.ServerStreamingServer[daemon.NetworkQualityTestProgress]
 
+func _ApplicationService_HTTPFetch_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(HTTPFetchRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(ApplicationServiceServer).HTTPFetch(m, &grpc.GenericServerStream[HTTPFetchRequest, HTTPFetchResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ApplicationService_HTTPFetchServer = grpc.ServerStreamingServer[HTTPFetchResponse]
+
 // ApplicationService_ServiceDesc is the grpc.ServiceDesc for ApplicationService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -329,6 +409,10 @@ var ApplicationService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CheckConfig",
 			Handler:    _ApplicationService_CheckConfig_Handler,
+		},
+		{
+			MethodName: "FormatConfig",
+			Handler:    _ApplicationService_FormatConfig_Handler,
 		},
 		{
 			MethodName: "GenerateSchema",
@@ -352,6 +436,11 @@ var ApplicationService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "StandaloneNetworkQualityTest",
 			Handler:       _ApplicationService_StandaloneNetworkQualityTest_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "HTTPFetch",
+			Handler:       _ApplicationService_HTTPFetch_Handler,
 			ServerStreams: true,
 		},
 	},

@@ -33,12 +33,15 @@ import fr.husi.proto.daemon.setGroupExpandRequest
 import fr.husi.proto.daemon.subscribeConnectionsRequest
 import fr.husi.proto.daemon.subscribeStatusRequest
 import fr.husi.proto.daemon.uRLTestRequest as daemonURLTestRequest
+import fr.husi.proto.v1.FormatConfigResponse
 import fr.husi.proto.v1.GenerateSchemaResponse
 import fr.husi.proto.v1.GetCertMode
 import fr.husi.proto.v1.GetCertResponse
 import fr.husi.proto.v1.GetClientMetadataResponse
 import fr.husi.proto.v1.GetDaemonInfoResponse
 import fr.husi.proto.v1.GetVersionResponse
+import fr.husi.proto.v1.HTTPFetchRequest
+import fr.husi.proto.v1.HTTPFetchResponse
 import fr.husi.proto.v1.PluginProcessSpec
 import fr.husi.proto.v1.SchemaKind
 import fr.husi.proto.v1.StandaloneURLTestResponse
@@ -49,6 +52,7 @@ import fr.husi.proto.v1.URLTestResponse
 import fr.husi.proto.v1.attachClientRequest
 import fr.husi.proto.v1.checkConfigRequest
 import fr.husi.proto.v1.claimServiceRequest
+import fr.husi.proto.v1.formatConfigRequest
 import fr.husi.proto.v1.generateSchemaRequest
 import fr.husi.proto.v1.getCertRequest
 import fr.husi.proto.v1.getClientMetadataRequest
@@ -144,6 +148,7 @@ interface CoreClient {
     ): Int
 
     suspend fun checkConfig(config: String)
+    suspend fun formatConfig(config: String): String
     suspend fun generateSchema(kind: SchemaKind): String
     suspend fun getCert(
         server: String,
@@ -173,6 +178,9 @@ interface CoreClient {
         maxRuntimeSeconds: Int,
         http3: Boolean,
     ): Flow<NetworkQualityTestProgress>
+
+    /** One head message, then the body in chunks. */
+    fun httpFetch(request: HTTPFetchRequest): Flow<HTTPFetchResponse>
 
     suspend fun resetNetwork()
     suspend fun runTask(taskId: String)
@@ -617,6 +625,14 @@ class BridgeCoreClient private constructor(
         )
     }
 
+    override suspend fun formatConfig(config: String): String {
+        val bytes = unary(
+            Methods.FORMAT_CONFIG,
+            formatConfigRequest { this.config = config }.toByteArray(),
+        )
+        return FormatConfigResponse.parseFrom(bytes).config
+    }
+
     override suspend fun generateSchema(kind: SchemaKind): String {
         val bytes = unary(
             Methods.GENERATE_SCHEMA,
@@ -697,6 +713,9 @@ class BridgeCoreClient private constructor(
             NetworkQualityTestProgress.parseFrom(it)
         }
     }
+
+    override fun httpFetch(request: HTTPFetchRequest): Flow<HTTPFetchResponse> =
+        oneShotStream(Methods.HTTP_FETCH, request.toByteArray()) { HTTPFetchResponse.parseFrom(it) }
 
     /**
      * Server-streaming RPC that ends when the host closes the stream (tool
@@ -856,12 +875,14 @@ class BridgeCoreClient private constructor(
         const val SUBSCRIBE_SERVICE_EVENTS = "/husi.v1.CoreService/SubscribeServiceEvents"
 
         const val CHECK_CONFIG = "/husi.v1.ApplicationService/CheckConfig"
+        const val FORMAT_CONFIG = "/husi.v1.ApplicationService/FormatConfig"
         const val GENERATE_SCHEMA = "/husi.v1.ApplicationService/GenerateSchema"
         const val STANDALONE_URL_TEST = "/husi.v1.ApplicationService/StandaloneURLTest"
         const val GET_CERT = "/husi.v1.ApplicationService/GetCert"
         const val STANDALONE_STUN_TEST = "/husi.v1.ApplicationService/StandaloneSTUNTest"
         const val STANDALONE_NETWORK_QUALITY_TEST =
             "/husi.v1.ApplicationService/StandaloneNetworkQualityTest"
+        const val HTTP_FETCH = "/husi.v1.ApplicationService/HTTPFetch"
 
         const val RUN_TASK = "/husi.v1.AppService/RunTask"
 
