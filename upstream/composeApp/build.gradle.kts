@@ -6,6 +6,7 @@ import org.gradle.jvm.tasks.Jar
 plugins {
     id("org.jetbrains.kotlin.multiplatform")
     id("com.android.kotlin.multiplatform.library")
+    id("com.android.lint")
     id("kotlin-parcelize")
     alias(libs.plugins.ksp)
     alias(libs.plugins.kotlin.compose)
@@ -24,8 +25,8 @@ enum class DesktopPlatform(
     val composeDependencyId: String,
     val nativeNames: Set<String>,
     val jnaName: String,
-    /** File name anja gives the core library, see `libcore/build.sh` (`-libname=husicore`). */
-    val libcoreLibraryName: String,
+    /** OS part of the `kurpc-natives-jvm` classifier. */
+    val kurpcName: String,
 ) {
     Linux(
         id = "linux",
@@ -33,7 +34,7 @@ enum class DesktopPlatform(
         composeDependencyId = "linux",
         nativeNames = setOf("linux"),
         jnaName = "linux",
-        libcoreLibraryName = "libhusicore.so",
+        kurpcName = "linux",
     ),
     Darwin(
         id = "darwin",
@@ -41,7 +42,7 @@ enum class DesktopPlatform(
         composeDependencyId = "macos",
         nativeNames = setOf("osx", "darwin"),
         jnaName = "darwin",
-        libcoreLibraryName = "libhusicore.dylib",
+        kurpcName = "macos",
     ),
     Windows(
         id = "windows",
@@ -49,7 +50,7 @@ enum class DesktopPlatform(
         composeDependencyId = "windows",
         nativeNames = setOf("windows"),
         jnaName = "win32",
-        libcoreLibraryName = "husicore.dll",
+        kurpcName = "windows",
     ),
     ;
 
@@ -80,6 +81,8 @@ enum class DesktopArch(
     val nativeNames: Set<String>,
     val jnaName: String,
     val nucleusName: String,
+    /** Arch part of the `kurpc-natives-jvm` classifier. */
+    val kurpcName: String,
 ) {
     Amd64(
         id = "amd64",
@@ -89,6 +92,7 @@ enum class DesktopArch(
         nativeNames = setOf("x64", "amd64"),
         jnaName = "x86-64",
         nucleusName = "x64",
+        kurpcName = "x86_64",
     ),
     Arm64(
         id = "arm64",
@@ -98,6 +102,7 @@ enum class DesktopArch(
         nativeNames = setOf("arm64", "aarch64"),
         jnaName = "aarch64",
         nucleusName = "aarch64",
+        kurpcName = "aarch64",
     ),
     ;
 
@@ -115,7 +120,11 @@ data class DesktopTarget(
     val arch: DesktopArch,
 ) {
     val id: String = "${platform.id}/${arch.id}"
-    val libcoreDesktopJarName: String = "libcore-desktop-${platform.id}-${arch.id}.jar"
+    /**
+     * libkurpc for this target. kurpc extracts it from the jar at its own resource path, outside
+     * the `natives/` tree the release jar filter rewrites, so it needs no sidecar.
+     */
+    val kurpcNativesClassifier: String = "${platform.kurpcName}-${arch.kurpcName}"
     val composeDependencyNotation: String =
         "org.jetbrains.compose.desktop:desktop-jvm-${platform.composeDependencyId}-${arch.composeDependencyId}"
     val nativeKeepPrefixes: Set<String> =
@@ -125,8 +134,6 @@ data class DesktopTarget(
                     listOf("natives/${platformName}_${archName}/", "natives/${platformName}-${archName}/")
                 }
             }.toSet()
-    /** The single entry anja puts in the libcore jar, the one native shipped as a sidecar instead. */
-    val libcoreNativeEntry: String = "natives/${platform.id}-${arch.id}/${platform.libcoreLibraryName}"
     val jnaNativeKeepPrefixes: Set<String> =
         setOf(
             "com/sun/jna/${platform.jnaName}-${arch.jnaName}/",
@@ -214,16 +221,6 @@ val requestedDesktopTarget =
 val desktopTarget = requestedDesktopTarget ?: resolveHostDesktopTarget()
 val composeDesktopVersion = libs.versions.composeMultiplatform.get()
 
-val desktopJarName = desktopTarget.libcoreDesktopJarName
-val desktopJarFile = layout.projectDirectory.file("libs/$desktopJarName").asFile
-val libcoreDesktopJarOptional = desktopJarFile.takeIf { it.isFile }?.let { files(it) }
-val libcoreDesktopJarRequired =
-    files({
-        require(desktopJarFile.isFile) {
-            "Missing desktop libcore jar '${desktopJarFile.path}'. Build it first, e.g. make libcore_desktop DESKTOP_TARGETS=$desktopTarget."
-        }
-        desktopJarFile
-    })
 val libcoreAarFile = layout.projectDirectory.file("libs/libcore.aar").asFile
 val checkLibcoreAar = tasks.register("checkLibcoreAar") {
     description = "Fails with an explanation when the Android libcore.aar has not been built yet."
@@ -236,7 +233,7 @@ val checkLibcoreAar = tasks.register("checkLibcoreAar") {
 }
 
 
-val bundledAssetFiles = listOf("geoip.tar.zst", "geosite.tar.zst")
+val bundledAssetFiles = listOf("geoip.tgz", "geosite.tgz")
 val bundledAssetsDir = layout.projectDirectory.dir("src/commonMain/composeResources/files/sing-box").asFile
 val warnMissingAssets = tasks.register("warnMissingBundledAssets") {
     description = "Warns when the geoip/geosite assets have not been downloaded yet."
@@ -285,6 +282,13 @@ val generateDesktopProguardMappingConfig = tasks.register("generateDesktopProgua
     }
 }
 
+val collectDesktopLibraryProguardRules =
+    tasks.register<CollectLibraryProguardRulesTask>("collectDesktopLibraryProguardRules") {
+        description = "Merges the ProGuard rules that desktop dependencies ship in their jars."
+        runtimeClasspath.from(configurations.named("desktopRuntimeClasspath"))
+        outputFile.set(layout.buildDirectory.file("compose/proguard/library-rules.pro"))
+    }
+
 buildkonfig {
     packageName = "fr.husi"
     exposeObjectWithName = "BuildConfig"
@@ -329,6 +333,12 @@ kotlin {
         androidResources {
             enable = true
         }
+        // commonMain compiles against the desktop JDK, so only lint notices a JDK API that
+        // Android lacks below minSdk.
+        lint {
+            checkOnly += "NewApi"
+            abortOnError = true
+        }
     }
 
     jvm("desktop")
@@ -336,11 +346,7 @@ kotlin {
     sourceSets {
         val commonMain = getByName("commonMain") {
             dependencies {
-                // Optional workaround for IDE to get libcore info
-                libcoreDesktopJarOptional?.let {
-                    compileOnly(it)
-                }
-
+                implementation(libs.kurpc)
                 implementation(libs.jetbrains.compose.runtime)
                 implementation(libs.jetbrains.compose.foundation)
                 implementation(libs.jetbrains.compose.material3)
@@ -356,6 +362,7 @@ kotlin {
                 implementation(libs.androidx.room.runtime)
                 implementation(libs.androidx.sqlite.bundled)
                 implementation(libs.kotlinx.serialization.json)
+                implementation(libs.kotlinx.serialization.protobuf)
                 implementation(libs.kotlinx.datetime)
 
                 implementation(libs.ini4j)
@@ -449,7 +456,13 @@ kotlin {
                 implementation(libs.nucleus.darkmode.detector)
                 implementation(libs.nucleus.autolaunch)
                 implementation(libs.nucleus.scheduler)
-                implementation(libcoreDesktopJarRequired)
+                // The KMP dependency DSL has no variantOf; the classifier goes in the notation.
+                libs.kurpc.natives.jvm.get().let { natives ->
+                    implementation(
+                        "${natives.module}:${natives.versionConstraint.requiredVersion}:" +
+                            desktopTarget.kurpcNativesClassifier,
+                    )
+                }
             }
         }
         getByName("desktopTest") {
@@ -477,7 +490,11 @@ compose.desktop {
         buildTypes.release.proguard {
             // Not real obfuscate, just for output mapping.
             obfuscate.set(true)
-            configurationFiles.from(project.file("r8-desktop.pro"), generateDesktopProguardMappingConfig)
+            configurationFiles.from(
+                project.file("r8-desktop.pro"),
+                collectDesktopLibraryProguardRules,
+                generateDesktopProguardMappingConfig,
+            )
         }
     }
 }
@@ -538,10 +555,8 @@ dependencies {
 tasks.matching { it.name == "packageReleaseUberJarForCurrentOS" }.configureEach {
     if (this is Jar) {
         // Exclude non-target native binaries from dependency family buckets.
-        // libcore natives/** are always stripped (thin release jar); others keep only the target arch.
 
         val nativeKeepPrefixes = desktopTarget.nativeKeepPrefixes
-        val libcoreNativeEntry = desktopTarget.libcoreNativeEntry
         val jnaNativeKeepPrefixes = desktopTarget.jnaNativeKeepPrefixes
         val composeTrayNativeKeepPrefixes = desktopTarget.composeTrayNativeKeepPrefixes
         val nucleusNativeKeepPrefixes = desktopTarget.nucleusNativeKeepPrefixes
@@ -552,14 +567,9 @@ tasks.matching { it.name == "packageReleaseUberJarForCurrentOS" }.configureEach 
 
         eachFile {
             val entryPath = path
-            // Keep only the target bucket of the natives/ family, and on top of that drop
-            // libcore's own native: the release uberjar is born thin (N7) and ships it as a
-            // plain file next to husi-core. Everything else here — androidx sqlite's
-            // libsqliteJni — has no sidecar. Dev classpath jars stay fat (untouched here).
-            if (
-                entryPath.startsWith("natives/") &&
-                (entryPath == libcoreNativeEntry || nativeKeepPrefixes.none(entryPath::startsWith))
-            ) {
+            // Keep only the target bucket of the natives/ family (androidx sqlite's
+            // libsqliteJni). Dev classpath jars stay fat (untouched here).
+            if (entryPath.startsWith("natives/") && nativeKeepPrefixes.none(entryPath::startsWith)) {
                 exclude()
                 return@eachFile
             }
