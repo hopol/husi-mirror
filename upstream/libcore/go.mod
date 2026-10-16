@@ -20,7 +20,6 @@ require (
 	github.com/coder/websocket v1.8.15
 	github.com/exclavenetwork/sing-juicity v0.3.1
 	github.com/godbus/dbus/v5 v5.2.2
-	github.com/gofrs/uuid/v5 v5.5.1
 	github.com/google/licensecheck v0.3.1
 	github.com/miekg/dns v1.1.72
 	github.com/oschwald/geoip2-golang v1.13.0
@@ -30,7 +29,7 @@ require (
 	github.com/sagernet/quic-go v0.61.0-sing-box-mod.9
 	github.com/sagernet/sing v0.9.7-0.20260929150544-6f21f2425a95
 	github.com/sagernet/sing-anytls v0.0.0-20260928104022-580984e4d8cb
-	github.com/sagernet/sing-box v1.15.0-alpha.11
+	github.com/sagernet/sing-box v1.15.0-alpha.12
 	github.com/sagernet/sing-mux v0.3.10-0.20260929204512-caf09fe32475
 	github.com/sagernet/sing-quic v0.7.2-0.20261002084117-75c3ac4fa12b
 	github.com/sagernet/sing-snell v0.0.0-20260904135315-bc5a12ac736f
@@ -42,11 +41,12 @@ require (
 	github.com/xchacha20-poly1305/TLS-scribe v0.13.1
 	github.com/xchacha20-poly1305/anchor v0.9.0
 	github.com/xchacha20-poly1305/libping v0.10.5
+	github.com/xchacha20-poly1305/protect-go v0.2.0
 	github.com/xchacha20-poly1305/sing-trusttunnel v0.3.3-0.20260928134000-daacc8079caf
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba
 	golang.org/x/mod v0.41.0
 	golang.org/x/net v0.59.0
-	golang.org/x/sys v0.48.0
+	golang.org/x/sys v0.49.0
 	google.golang.org/grpc v1.83.2
 	google.golang.org/protobuf v1.36.12
 )
@@ -70,6 +70,7 @@ require (
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/gobwas/httphead v0.1.0 // indirect
 	github.com/gobwas/pool v0.2.1 // indirect
+	github.com/gofrs/uuid/v5 v5.5.1 // indirect
 	github.com/google/btree v1.1.3 // indirect
 	github.com/google/certificate-transparency-go v1.3.2 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect

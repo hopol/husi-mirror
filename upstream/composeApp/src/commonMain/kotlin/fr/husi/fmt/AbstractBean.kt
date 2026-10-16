@@ -36,6 +36,14 @@ abstract class AbstractBean : Serializable() {
         return joinAddress(serverAddress, serverPort)
     }
 
+    fun pluginDialAddress(): String {
+        return joinAddress(finalAddress, finalPort)
+    }
+
+    fun pluginServerName(sni: String): String {
+        return sni.ifBlank { serverAddress }
+    }
+
     open fun network(): String {
         return "tcp,udp"
     }
@@ -45,6 +53,7 @@ abstract class AbstractBean : Serializable() {
     open val needUDPOverTCP get() = false
     open val canMapping get() = true
 
+    /** Whether the plugin built for this platform can hand its sockets to the protect service. */
     open val canSelfProtect get() = false
 
     open fun isInsecure(): ValidateResult {
