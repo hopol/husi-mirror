@@ -45,7 +45,6 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import fr.husi.compose.BackHandler
 import fr.husi.compose.CapsuleTopBar
 import fr.husi.compose.SimpleIconButton
 import fr.husi.compose.TextButton
@@ -78,10 +77,10 @@ import fr.husi.resources.nat_result_hint
 import fr.husi.resources.nat_stun_server_hint
 import fr.husi.resources.nat_type_detection
 import fr.husi.resources.nat_type_not_supported
-import fr.husi.resources.nat_unknown
 import fr.husi.resources.start
 import fr.husi.resources.stun_attest_loading
 import fr.husi.resources.stun_test
+import fr.husi.resources.unknown
 import fr.husi.ui.PreviewContainer
 import fr.husi.ui.remote.RemoteTargetMenuSection
 import org.jetbrains.compose.resources.stringResource
@@ -98,12 +97,6 @@ internal fun StunScreen(
         StunScreenViewModel(remoteControl = remoteControl)
     },
 ) {
-    fun exit() {
-        viewModel.cancel()
-        onBackPress()
-    }
-    BackHandler(true, ::exit)
-
     var alertMessage by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) {
         viewModel.uiEvent.collect { event ->
@@ -132,7 +125,7 @@ internal fun StunScreen(
                     SimpleIconButton(
                         imageVector = vectorResource(Res.drawable.arrow_back),
                         contentDescription = stringResource(Res.string.back),
-                        onClick = ::exit,
+                        onClick = onBackPress,
                     )
                 },
                 title = { Text(stringResource(Res.string.stun_test)) },
@@ -419,7 +412,7 @@ private fun PendingIndicator(modifier: Modifier = Modifier) {
 @Composable
 private fun natBehaviourLabel(value: NatBehaviour): String = stringResource(
     when (value) {
-        NatBehaviour.Unknown -> Res.string.nat_unknown
+        NatBehaviour.Unknown -> Res.string.unknown
         NatBehaviour.EndpointIndependent -> Res.string.nat_endpoint_independent
         NatBehaviour.AddressDependent -> Res.string.nat_address_dependent
         NatBehaviour.AddressAndPortDependent -> Res.string.nat_address_and_port_dependent

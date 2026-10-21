@@ -13,6 +13,7 @@ import fr.husi.proto.daemon.ClashMode
 import fr.husi.proto.daemon.ClashModeStatus
 import fr.husi.proto.daemon.ConnectionEvents
 import fr.husi.proto.daemon.DefaultLogLevel
+import fr.husi.proto.daemon.DownloadTaildropFileChunk
 import fr.husi.proto.daemon.Groups
 import fr.husi.proto.daemon.Log
 import fr.husi.proto.daemon.NetworkQualityTestProgress
@@ -25,17 +26,34 @@ import fr.husi.proto.daemon.STUNTestProgress
 import fr.husi.proto.daemon.ServiceStatus
 import fr.husi.proto.daemon.StartedAt
 import fr.husi.proto.daemon.Status
+import fr.husi.proto.daemon.TaildropInbox
+import fr.husi.proto.daemon.TaildropSendClientMessage
+import fr.husi.proto.daemon.TaildropSendServerMessage
+import fr.husi.proto.daemon.TailscaleCertificate
+import fr.husi.proto.daemon.TailscalePingResponse
+import fr.husi.proto.daemon.TailscaleSSHClientMessage
+import fr.husi.proto.daemon.TailscaleSSHServerMessage
+import fr.husi.proto.daemon.TailscaleStatusUpdate
 import fr.husi.proto.daemon.Version
+import fr.husi.proto.daemon.cancelTaildropReceivingRequest
 import fr.husi.proto.daemon.clashMode
 import fr.husi.proto.daemon.closeConnectionRequest
+import fr.husi.proto.daemon.deleteTaildropFileRequest
+import fr.husi.proto.daemon.downloadTaildropFileRequest
+import fr.husi.proto.daemon.markTaildropInboxReadRequest
 import fr.husi.proto.daemon.networkQualityTestRequest
 import fr.husi.proto.daemon.openConnectAuthChallengeCancel
 import fr.husi.proto.daemon.openVPNChallengeCancel
 import fr.husi.proto.daemon.sTUNTestRequest
 import fr.husi.proto.daemon.selectOutboundRequest
 import fr.husi.proto.daemon.setGroupExpandRequest
+import fr.husi.proto.daemon.setTailscaleExitNodeRequest
 import fr.husi.proto.daemon.subscribeConnectionsRequest
 import fr.husi.proto.daemon.subscribeStatusRequest
+import fr.husi.proto.daemon.subscribeTaildropInboxRequest
+import fr.husi.proto.daemon.tailscaleCertificateRequest
+import fr.husi.proto.daemon.tailscaleLogoutRequest
+import fr.husi.proto.daemon.tailscalePingRequest
 import fr.husi.proto.daemon.uRLTestRequest as daemonURLTestRequest
 import fr.husi.proto.v1.FormatConfigResponse
 import fr.husi.proto.v1.GenerateSchemaResponse
@@ -60,6 +78,12 @@ import fr.husi.proto.v1.StartServiceRequest
 import fr.husi.proto.v1.SubscribeServiceEventsResponse
 import fr.husi.proto.v1.URLTestOptions
 import fr.husi.proto.v1.URLTestResponse
+import fr.husi.proto.v1.WebDAVDeleteRequest
+import fr.husi.proto.v1.WebDAVDownloadRequest
+import fr.husi.proto.v1.WebDAVDownloadResponse
+import fr.husi.proto.v1.WebDAVListRequest
+import fr.husi.proto.v1.WebDAVListResponse
+import fr.husi.proto.v1.WebDAVUploadRequest
 import fr.husi.proto.v1.attachClientRequest
 import fr.husi.proto.v1.checkConfigRequest
 import fr.husi.proto.v1.claimServiceRequest
@@ -92,10 +116,12 @@ import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.transform
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeout
 import javax.net.ssl.SSLSocketFactory
 import java.io.File
 import kotlin.time.Duration
@@ -133,6 +159,30 @@ interface CoreClient {
     fun subscribeOpenVPNStatus(): Flow<OpenVPNStatusUpdate>
     suspend fun submitOpenVPNChallengeResponse(submission: OpenVPNChallengeSubmission)
     suspend fun cancelOpenVPNChallenge(endpointTag: String, challengeId: String)
+    fun subscribeTailscaleStatus(): Flow<TailscaleStatusUpdate>
+    fun tailscalePing(tag: String, ip: String): Flow<TailscalePingResponse>
+
+    /** [stableId] empty clears the exit node. */
+    suspend fun setTailscaleExitNode(tag: String, stableId: String)
+    suspend fun tailscaleLogout(tag: String)
+    suspend fun getTailscaleCertificate(
+        tag: String,
+        domain: String,
+        minValiditySeconds: Long = 0,
+    ): TailscaleCertificate
+    fun subscribeTaildropInbox(tag: String): Flow<TaildropInbox>
+    suspend fun markTaildropInboxRead(tag: String)
+    suspend fun deleteTaildropFile(tag: String, name: String)
+    suspend fun cancelTaildropReceiving(tag: String, senderId: String, name: String)
+
+    /**
+     * The first message carries the file size. Later messages carry the bytes.
+     */
+    fun downloadTaildropFile(tag: String, name: String): Flow<DownloadTaildropFileChunk>
+    fun sendTaildropFiles(requests: Flow<TaildropSendClientMessage>): Flow<TaildropSendServerMessage>
+
+    /** The first request must be the start message; the rest carry input and window sizes. */
+    fun startTailscaleSSHSession(requests: Flow<TailscaleSSHClientMessage>): Flow<TailscaleSSHServerMessage>
     suspend fun getVersion(): GetVersionResponse
     suspend fun getDaemonVersion(): Version
     suspend fun getStartedAt(): Long
@@ -196,6 +246,16 @@ interface CoreClient {
     /** One head message, then the body in chunks. */
     fun httpFetch(request: HTTPFetchRequest): Flow<HTTPFetchResponse>
 
+    suspend fun webdavList(request: WebDAVListRequest): WebDAVListResponse
+
+    /** One head message, then the file in chunks. */
+    suspend fun webdavUpload(requests: Flow<WebDAVUploadRequest>)
+
+    /** The file in chunks. */
+    fun webdavDownload(request: WebDAVDownloadRequest): Flow<WebDAVDownloadResponse>
+
+    suspend fun webdavDelete(request: WebDAVDeleteRequest)
+
     /** Latency in milliseconds. [port] is ignored by ICMP. */
     suspend fun ping(protocol: PingProtocol, address: String, port: Int, timeoutMs: Int): Int
 
@@ -232,10 +292,18 @@ class CoreRpcException(
     cause: Throwable? = null,
 ) : Exception(message, cause)
 
+/**
+ * One Taildrop upload chunk. Matches sing-box `daemon.TaildropChunkSize`: small enough to stay
+ * inside a single gRPC DATA frame.
+ */
+const val TAILDROP_CHUNK_SIZE = 16 * 1024 - 64
+
 /** The calls [KurpcCoreClient] makes, so tests can inject a fake instead of a kurpc channel. */
 internal interface CoreChannel {
     suspend fun unary(method: String, request: ByteArray, options: CallOptions): ByteArray
     fun serverStreaming(method: String, request: ByteArray): Flow<ByteArray>
+    suspend fun clientStreaming(method: String, requests: Flow<ByteArray>, options: CallOptions): ByteArray
+    fun bidiStreaming(method: String, requests: Flow<ByteArray>): Flow<ByteArray>
     fun close()
 }
 
@@ -247,6 +315,15 @@ private class KurpcCoreChannel(private val channel: RpcChannel) : CoreChannel {
     // starting should connect, not fail and back off.
     override fun serverStreaming(method: String, request: ByteArray): Flow<ByteArray> =
         channel.serverStreaming(method, request, CallOptions(waitForReady = true))
+
+    override suspend fun clientStreaming(
+        method: String,
+        requests: Flow<ByteArray>,
+        options: CallOptions,
+    ): ByteArray = channel.clientStreaming(method, requests, options)
+
+    override fun bidiStreaming(method: String, requests: Flow<ByteArray>): Flow<ByteArray> =
+        channel.bidiStreaming(method, requests, CallOptions(waitForReady = true))
 
     override fun close() = channel.close()
 }
@@ -287,6 +364,12 @@ class KurpcCoreClient internal constructor(
         request: ByteArray = EMPTY_PROTO,
         timeout: Duration = DEFAULT_UNARY_TIMEOUT,
     ): ByteArray = rpc { channel().unary(method, request, CallOptions(timeout = timeout)) }
+
+    private suspend fun clientStream(
+        method: String,
+        requests: Flow<ByteArray>,
+        timeout: Duration,
+    ): ByteArray = rpc { channel().clientStreaming(method, requests, CallOptions(timeout = timeout)) }
 
     /**
      * Long-lived server stream. Whenever the stream ends, cleanly or not, it is opened again
@@ -443,6 +526,107 @@ class KurpcCoreClient internal constructor(
         )
     }
 
+    override fun subscribeTailscaleStatus(): Flow<TailscaleStatusUpdate> =
+        stream(Methods.SUBSCRIBE_TAILSCALE_STATUS) { TailscaleStatusUpdate.parseFrom(it) }
+
+    override fun tailscalePing(tag: String, ip: String): Flow<TailscalePingResponse> {
+        val request = tailscalePingRequest {
+            endpointTag = tag
+            peerIP = ip
+        }.toByteArray()
+        return oneShotStream(Methods.START_TAILSCALE_PING, request) { TailscalePingResponse.parseFrom(it) }
+    }
+
+    override suspend fun setTailscaleExitNode(tag: String, stableId: String) {
+        unary(
+            Methods.SET_TAILSCALE_EXIT_NODE,
+            setTailscaleExitNodeRequest {
+                endpointTag = tag
+                stableID = stableId
+            }.toByteArray(),
+        )
+    }
+
+    override suspend fun tailscaleLogout(tag: String) {
+        unary(
+            Methods.TAILSCALE_LOGOUT,
+            tailscaleLogoutRequest { endpointTag = tag }.toByteArray(),
+        )
+    }
+
+    override suspend fun getTailscaleCertificate(
+        tag: String,
+        domain: String,
+        minValiditySeconds: Long,
+    ): TailscaleCertificate {
+        val response = unary(
+            Methods.GET_TAILSCALE_CERTIFICATE,
+            tailscaleCertificateRequest {
+                endpointTag = tag
+                this.domain = domain
+                this.minValiditySeconds = minValiditySeconds
+            }.toByteArray(),
+        )
+        return TailscaleCertificate.parseFrom(response)
+    }
+
+    override fun subscribeTaildropInbox(tag: String): Flow<TaildropInbox> {
+        val request = subscribeTaildropInboxRequest { endpointTag = tag }.toByteArray()
+        return stream(Methods.SUBSCRIBE_TAILDROP_INBOX, request) { TaildropInbox.parseFrom(it) }
+    }
+
+    override suspend fun markTaildropInboxRead(tag: String) {
+        unary(
+            Methods.MARK_TAILDROP_INBOX_READ,
+            markTaildropInboxReadRequest { endpointTag = tag }.toByteArray(),
+        )
+    }
+
+    override suspend fun deleteTaildropFile(tag: String, name: String) {
+        unary(
+            Methods.DELETE_TAILDROP_FILE,
+            deleteTaildropFileRequest {
+                endpointTag = tag
+                this.name = name
+            }.toByteArray(),
+        )
+    }
+
+    override suspend fun cancelTaildropReceiving(tag: String, senderId: String, name: String) {
+        unary(
+            Methods.CANCEL_TAILDROP_RECEIVING,
+            cancelTaildropReceivingRequest {
+                endpointTag = tag
+                senderID = senderId
+                this.name = name
+            }.toByteArray(),
+        )
+    }
+
+    override fun downloadTaildropFile(tag: String, name: String): Flow<DownloadTaildropFileChunk> {
+        val request = downloadTaildropFileRequest {
+            endpointTag = tag
+            this.name = name
+        }.toByteArray()
+        return oneShotStream(Methods.DOWNLOAD_TAILDROP_FILE, request) {
+            DownloadTaildropFileChunk.parseFrom(it)
+        }
+    }
+
+    override fun sendTaildropFiles(
+        requests: Flow<TaildropSendClientMessage>,
+    ): Flow<TaildropSendServerMessage> = bidiStream(
+        Methods.SEND_TAILDROP_FILES,
+        requests.map { it.toByteArray() },
+    ) { TaildropSendServerMessage.parseFrom(it) }
+
+    override fun startTailscaleSSHSession(
+        requests: Flow<TailscaleSSHClientMessage>,
+    ): Flow<TailscaleSSHServerMessage> = bidiStream(
+        Methods.START_TAILSCALE_SSH_SESSION,
+        requests.map { it.toByteArray() },
+    ) { TailscaleSSHServerMessage.parseFrom(it) }
+
     override suspend fun getVersion(): GetVersionResponse {
         return GetVersionResponse.parseFrom(
             unary(Methods.HUSI_GET_VERSION, getVersionRequest { }.toByteArray()),
@@ -547,6 +731,30 @@ class KurpcCoreClient internal constructor(
             30.seconds,
         )
         return GetCertResponse.parseFrom(bytes).pem
+    }
+
+    override suspend fun webdavList(request: WebDAVListRequest): WebDAVListResponse {
+        val bytes = unary(Methods.WEBDAV_LIST, request.toByteArray(), WEBDAV_TIMEOUT)
+        return WebDAVListResponse.parseFrom(bytes)
+    }
+
+    override suspend fun webdavUpload(requests: Flow<WebDAVUploadRequest>) {
+        clientStream(Methods.WEBDAV_UPLOAD, requests.map { it.toByteArray() }, WEBDAV_TIMEOUT)
+    }
+
+    // A server stream carries no deadline of its own, so the download sets the upload's.
+    override fun webdavDownload(request: WebDAVDownloadRequest): Flow<WebDAVDownloadResponse> = flow {
+        withTimeout(WEBDAV_TIMEOUT) {
+            emitAll(
+                oneShotStream(Methods.WEBDAV_DOWNLOAD, request.toByteArray()) {
+                    WebDAVDownloadResponse.parseFrom(it)
+                },
+            )
+        }
+    }
+
+    override suspend fun webdavDelete(request: WebDAVDeleteRequest) {
+        unary(Methods.WEBDAV_DELETE, request.toByteArray(), WEBDAV_TIMEOUT)
     }
 
     override suspend fun ping(protocol: PingProtocol, address: String, port: Int, timeoutMs: Int): Int {
@@ -664,6 +872,19 @@ class KurpcCoreClient internal constructor(
         )
     }.buffer(Channel.UNLIMITED)
 
+    /** Bidirectional stream that ends when the host closes it. Does not auto-retry. */
+    private fun <T> bidiStream(
+        method: String,
+        requests: Flow<ByteArray>,
+        parse: (ByteArray) -> T,
+    ): Flow<T> = flow {
+        emitAll(
+            channel().bidiStreaming(method, requests)
+                .parseEach(method, parse)
+                .catch { error -> throw error.toCoreRpcException() },
+        )
+    }.buffer(Channel.UNLIMITED)
+
     override suspend fun resetNetwork() {
         unary(Methods.RESET_NETWORK, resetNetworkRequest { }.toByteArray())
     }
@@ -756,6 +977,18 @@ class KurpcCoreClient internal constructor(
         const val SUBMIT_OPENVPN_CHALLENGE_RESPONSE =
             "/daemon.StartedService/SubmitOpenVPNChallengeResponse"
         const val CANCEL_OPENVPN_CHALLENGE = "/daemon.StartedService/CancelOpenVPNChallenge"
+        const val SUBSCRIBE_TAILSCALE_STATUS = "/daemon.StartedService/SubscribeTailscaleStatus"
+        const val START_TAILSCALE_PING = "/daemon.StartedService/StartTailscalePing"
+        const val SET_TAILSCALE_EXIT_NODE = "/daemon.StartedService/SetTailscaleExitNode"
+        const val TAILSCALE_LOGOUT = "/daemon.StartedService/TailscaleLogout"
+        const val GET_TAILSCALE_CERTIFICATE = "/daemon.StartedService/GetTailscaleCertificate"
+        const val START_TAILSCALE_SSH_SESSION = "/daemon.StartedService/StartTailscaleSSHSession"
+        const val SUBSCRIBE_TAILDROP_INBOX = "/daemon.StartedService/SubscribeTaildropInbox"
+        const val MARK_TAILDROP_INBOX_READ = "/daemon.StartedService/MarkTaildropInboxRead"
+        const val SEND_TAILDROP_FILES = "/daemon.StartedService/SendTaildropFiles"
+        const val DOWNLOAD_TAILDROP_FILE = "/daemon.StartedService/DownloadTaildropFile"
+        const val DELETE_TAILDROP_FILE = "/daemon.StartedService/DeleteTaildropFile"
+        const val CANCEL_TAILDROP_RECEIVING = "/daemon.StartedService/CancelTaildropReceiving"
 
         const val HUSI_GET_VERSION = "/husi.v1.CoreService/GetVersion"
         const val HUSI_URL_TEST = "/husi.v1.CoreService/URLTest"
@@ -771,6 +1004,10 @@ class KurpcCoreClient internal constructor(
         const val STANDALONE_NETWORK_QUALITY_TEST =
             "/husi.v1.ApplicationService/StandaloneNetworkQualityTest"
         const val HTTP_FETCH = "/husi.v1.ApplicationService/HTTPFetch"
+        const val WEBDAV_LIST = "/husi.v1.ApplicationService/WebDAVList"
+        const val WEBDAV_UPLOAD = "/husi.v1.ApplicationService/WebDAVUpload"
+        const val WEBDAV_DOWNLOAD = "/husi.v1.ApplicationService/WebDAVDownload"
+        const val WEBDAV_DELETE = "/husi.v1.ApplicationService/WebDAVDelete"
         const val PING = "/husi.v1.ApplicationService/Ping"
         const val MATCH_RULE_SETS = "/husi.v1.ApplicationService/MatchRuleSets"
         const val GET_ROOT_CERTIFICATES = "/husi.v1.ApplicationService/GetRootCertificates"
@@ -790,6 +1027,7 @@ class KurpcCoreClient internal constructor(
 
     companion object {
         private val DEFAULT_UNARY_TIMEOUT = 10.seconds
+        private val WEBDAV_TIMEOUT = 2.minutes
 
         /**
          * Longer than [DEFAULT_UNARY_TIMEOUT]: take-over blocks on a human
