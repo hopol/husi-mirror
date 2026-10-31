@@ -14,6 +14,7 @@ import fr.husi.TrafficSortMode
 import fr.husi.bg.BackendState
 import fr.husi.bg.DefaultNetworkListener
 import fr.husi.bg.SpeedStats
+import fr.husi.bg.routeGeoDir
 import fr.husi.core.CoreClient
 import fr.husi.core.formatConnectionTime
 import fr.husi.core.remote.RemoteControlManager
@@ -22,6 +23,8 @@ import fr.husi.database.DataStore
 import fr.husi.fmt.SingBoxOptions
 import fr.husi.fmt.proxyDisplayName
 import fr.husi.ktx.Logs
+import fr.husi.ktx.listByLineIgnoringComments
+import fr.husi.ktx.readableMessage
 import fr.husi.ktx.runOnDefaultDispatcher
 import fr.husi.ktx.runOnIoDispatcher
 import fr.husi.platform.PlatformInfo
@@ -31,9 +34,15 @@ import fr.husi.proto.daemon.ConnectionEvents
 import fr.husi.proto.daemon.Group
 import fr.husi.proto.daemon.GroupItem
 import fr.husi.proto.v1.URLTestOptions
+import fr.husi.repository.resolveRepository
+import fr.husi.resources.Res
+import fr.husi.resources.ip_test_no_servers
+import fr.husi.ui.StringOrRes
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -78,6 +87,7 @@ data class DashboardState(
     val rxRateDirect: Long = 0,
     val proxySpeedHistory: List<Float> = idleSpeedHistory(),
     val directSpeedHistory: List<Float> = idleSpeedHistory(),
+    val ipProbe: IPProbeState = IPProbeState(),
     val ipv4: String? = null,
     val ipv6: String? = null,
     val selectedClashMode: String = "",
@@ -378,7 +388,27 @@ class DashboardViewModel(
     private var clashModeJob: Job? = null
     private val processInfoResolver = ProcessInfoResolver()
 
+    private var dashboardActive = false
+    private var initialized = false
+
+    fun setDashboardActive(active: Boolean) {
+        if (dashboardActive == active) return
+        dashboardActive = active
+        if (active && initialized) autoDetectIP()
+    }
+
+    private fun autoDetectIP() = viewModelScope.launch {
+        if (!dashboardActive || !initialized || isRemote || !DataStore.autoDetectIP.get()) return@launch
+        val widgets = decodeDashboardWidgets(DataStore.dashboardWidgets.get())
+        if (dashboardActive && initialized && widgets.any { it.widget == DashboardWidget.ExitIP && it.visible }) {
+            detectIP()
+        }
+    }
+
     suspend fun initialize(isConnected: Boolean) {
+        val firstInitialization = !initialized
+        initialized = false
+        ipProbeJob?.cancelAndJoin()
         statusJob?.cancel()
         groupsJob?.cancel()
         outboundsJob?.cancel()
@@ -392,6 +422,7 @@ class DashboardViewModel(
         latestProxySets.value = emptyList()
         uiState.update { state ->
             state.copy(
+                ipProbe = IPProbeState(),
                 connections = emptyList(),
                 activeConnectionCount = 0,
                 proxySets = emptyList(),
@@ -407,6 +438,8 @@ class DashboardViewModel(
                 directSpeedHistory = idleSpeedHistory(),
             )
         }
+        initialized = true
+        if (firstInitialization || isConnected) autoDetectIP()
         if (!isConnected) return
         if (!isRemote) {
             BackendState.status.value.speed?.let(::appendSpeed)
@@ -572,9 +605,11 @@ class DashboardViewModel(
     }
 
     fun setDashboardWidgets(entries: List<DashboardWidgetEntry>) =
-        viewModelScope.launch(Dispatchers.Default) {
+        viewModelScope.launch(Dispatchers.IO) {
             DataStore.dashboardWidgets.set(encodeDashboardWidgets(entries))
         }
+
+    fun resetDashboardWidgets() = setDashboardWidgets(defaultDashboardWidgets())
 
     fun setQueryActivate(queryActivate: Boolean) = runOnIoDispatcher {
         val old = uiState.value.queryOptions
@@ -966,6 +1001,37 @@ class DashboardViewModel(
             Logs.w(e)
         } finally {
             setUrlTestProgress(id, null)
+        }
+    }
+
+    private var ipProbeJob: Job? = null
+
+    fun detectIP() {
+        if (isRemote || ipProbeJob?.isActive == true) return
+        ipProbeJob = viewModelScope.launch {
+            uiState.update { it.copy(ipProbe = IPProbeState(isDoing = true)) }
+            try {
+                val server = DataStore.ipTestServers.get().listByLineIgnoringComments().randomOrNull()
+                if (server == null) {
+                    uiState.update {
+                        it.copy(ipProbe = IPProbeState(error = StringOrRes.Res(Res.string.ip_test_no_servers)))
+                    }
+                    return@launch
+                }
+                val client = coreClient
+                val ip = client.detectIP(server)
+                uiState.update { it.copy(ipProbe = IPProbeState(isDoing = true, ip = ip)) }
+                val country = client.lookupIPCountry(
+                    routeGeoDir(resolveRepository().externalAssetsDir), ip,
+                )
+                uiState.update { it.copy(ipProbe = IPProbeState(ip = ip, countryCode = country)) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                uiState.update { it.copy(ipProbe = it.ipProbe.copy(error = StringOrRes.Direct(e.readableMessage))) }
+            } finally {
+                uiState.update { it.copy(ipProbe = it.ipProbe.copy(isDoing = false)) }
+            }
         }
     }
 
