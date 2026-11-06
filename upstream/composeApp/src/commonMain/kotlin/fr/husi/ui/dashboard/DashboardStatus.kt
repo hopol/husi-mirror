@@ -74,6 +74,8 @@ import fr.husi.resources.status_status
 import fr.husi.resources.system_proxy
 import fr.husi.resources.system_proxy_unavailable_inbound_auth
 import fr.husi.resources.tailscale
+import fr.husi.resources.dashboard_traffic_usage
+import fr.husi.resources.traffic_connections
 import fr.husi.resources.visibility
 import fr.husi.resources.visibility_off
 import fr.husi.tailscale.TailscaleEndpointState
@@ -256,6 +258,8 @@ private fun DashboardWidgetContent(
             modifier = Modifier.fillMaxSize(),
         )
 
+        DashboardWidget.TrafficUsage -> TrafficUsageCard(uiState, Modifier.fillMaxSize())
+
         DashboardWidget.ExitIP -> ExitIPCard(uiState.ipProbe, detectIP)
 
         DashboardWidget.Status -> StatusCard(uiState = uiState)
@@ -349,6 +353,7 @@ private fun dashboardWidgetTitle(widget: DashboardWidget): String = stringResour
         DashboardWidget.ProxySpeed -> Res.string.proxy
         DashboardWidget.DirectSpeed -> Res.string.direct
         DashboardWidget.ExitIP -> Res.string.ip_test
+        DashboardWidget.TrafficUsage -> Res.string.dashboard_traffic_usage
         DashboardWidget.Status -> Res.string.status_status
         DashboardWidget.OpenConnect -> Res.string.action_openconnect
         DashboardWidget.OpenVPN -> Res.string.action_openvpn
@@ -386,6 +391,13 @@ private fun StatusCard(uiState: DashboardState) {
             ) {
                 Text(stringResource(Res.string.status_goroutines))
                 Text(uiState.goroutines.toString())
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(stringResource(Res.string.traffic_connections))
+                Text(uiState.activeConnectionCount.toString())
             }
         }
     }
