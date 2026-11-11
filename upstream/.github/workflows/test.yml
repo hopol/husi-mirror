@@ -45,6 +45,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+env:
+  HUSI_TEST_INTERNET: 1
+
 jobs:
   shellcheck:
     runs-on: ubuntu-latest
@@ -111,11 +114,7 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
           cache-dependency-path: 'libcore/go.sum'
-      - name: Install protoc
-        run: |
-          curl -fsSL -o /tmp/protoc.zip "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip"
-          sudo unzip -o /tmp/protoc.zip -d /usr/local bin/protoc 'include/*'
-          rm /tmp/protoc.zip
+      - uses: ./.github/actions/setup-protoc
       - name: Regenerate protocol
         run: make proto
       - name: Check the generated tree is up to date
@@ -137,7 +136,7 @@ jobs:
         id: kotlin-tests
         env:
           BUILD_PLUGIN: none
-        run: ./gradlew :composeApp:allTests --build-cache
+        run: ./gradlew :composeApp:desktopTest --build-cache
       - name: Upload Kotlin test report
         if: failure() && steps.kotlin-tests.outcome == 'failure'
         uses: actions/upload-artifact@v7
