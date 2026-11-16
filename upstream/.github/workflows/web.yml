@@ -18,7 +18,6 @@ on:
       - buildSrc/**
       - buildScript/publish_web.sh
       - .github/workflows/web.yml
-      - .github/actions/setup-protoc/**
   workflow_dispatch:
 
 permissions:
@@ -38,9 +37,8 @@ jobs:
         with:
           submodules: recursive
       - uses: ./.github/actions/load-build-versions
-      - uses: ./.github/actions/setup-protoc
       - uses: ./.github/actions/setup-jbr
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -59,7 +57,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: dashboard
-          path: composeApp/build/distributions/*.zip
+          path: composeApp/build/distributions/dashboard.zip
           if-no-files-found: error
       - name: Publish single-commit gh-pages branch
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/dev'

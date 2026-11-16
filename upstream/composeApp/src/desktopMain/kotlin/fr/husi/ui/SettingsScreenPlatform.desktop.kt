@@ -16,12 +16,12 @@ import fr.husi.DesktopAutoStart
 import fr.husi.compose.IconMaskColors
 import fr.husi.compose.IconMaskShapes
 import fr.husi.compose.MaskedIcon
-import fr.husi.compose.collectAsStateWithLifecycle
 import fr.husi.compose.Preference
 import fr.husi.compose.SwitchPreference
 import fr.husi.compose.TextButton
 import fr.husi.compose.TextFieldPreference
 import fr.husi.compose.ValidatedTextField
+import fr.husi.compose.collectAsStateWithLifecycle
 import fr.husi.compose.material3.Icon
 import fr.husi.compose.material3.Text
 import fr.husi.compose.validateTunInterfaceName
@@ -30,6 +30,7 @@ import fr.husi.database.DataStore
 import fr.husi.database.preference.setBlocking
 import fr.husi.ktx.Logs
 import fr.husi.ktx.readableMessage
+import fr.husi.platform.DesktopPackageEnvironment
 import fr.husi.platform.PlatformInfo
 import fr.husi.repository.DaemonInstallResult
 import fr.husi.repository.DaemonOwner
@@ -60,6 +61,8 @@ import fr.husi.resources.forced_search_process_summary
 import fr.husi.resources.install_daemon
 import fr.husi.resources.install_daemon_summary
 import fr.husi.resources.manage_search
+import fr.husi.resources.network_manager_tun
+import fr.husi.resources.network_manager_tun_summary
 import fr.husi.resources.phonelink_ring
 import fr.husi.resources.remember_window_size
 import fr.husi.resources.remember_window_size_summary
@@ -146,7 +149,7 @@ private fun DaemonOptionsGroup(showMessage: (String) -> Unit) {
         }
         startAtBootLoaded = false
         runCatching {
-            coreClient.getDaemonInfo().startAtBoot
+            coreClient.getDaemonInfo().start_at_boot
         }.onSuccess { enabled ->
             startAtBoot = enabled
             startAtBootLoaded = true
@@ -157,87 +160,89 @@ private fun DaemonOptionsGroup(showMessage: (String) -> Unit) {
     }
 
     val needsUpdate = hostState.apiVersionMismatch
-    Preference(
-        title = {
-            Text(
-                stringResource(
+    if (DesktopPackageEnvironment.current.canInstallSystemDaemon) {
+        Preference(
+            title = {
+                Text(
+                    stringResource(
+                        if (needsUpdate) {
+                            Res.string.update_daemon
+                        } else {
+                            Res.string.install_daemon
+                        },
+                    ),
+                )
+            },
+            icon = {
+                MaskedIcon(
                     if (needsUpdate) {
-                        Res.string.update_daemon
+                        Res.drawable.update
                     } else {
-                        Res.string.install_daemon
+                        Res.drawable.security
                     },
-                ),
-            )
-        },
-        icon = {
-            MaskedIcon(
-                if (needsUpdate) {
-                    Res.drawable.update
-                } else {
-                    Res.drawable.security
-                },
-                color = if (needsUpdate) {
-                    IconMaskColors.IconCoral
-                } else {
-                    IconMaskColors.IconCyan
-                },
-            )
-        },
-        summary = {
-            Text(
-                stringResource(
-                    when {
-                        needsUpdate -> Res.string.update_daemon_summary
-                        hostState.isDaemon -> Res.string.daemon_installed_summary
-                        else -> Res.string.install_daemon_summary
+                    color = if (needsUpdate) {
+                        IconMaskColors.IconCoral
+                    } else {
+                        IconMaskColors.IconCyan
                     },
-                ),
-            )
-        },
-        enabled = !installing && !takingOver,
-        onClick = {
-            if (installing) return@Preference
-            installing = true
-            scope.launch {
-                try {
-                    val result = withContext(Dispatchers.IO) { installDaemon() }
-                    when (result) {
-                        DaemonInstallResult.Success -> {
-                            runCatching {
-                                repository.reattachDaemon()
-                            }.onFailure {
-                                Logs.w("reattach after daemon install failed", it)
-                                showMessage(it.readableMessage)
-                                return@launch
+                )
+            },
+            summary = {
+                Text(
+                    stringResource(
+                        when {
+                            needsUpdate -> Res.string.update_daemon_summary
+                            hostState.isDaemon -> Res.string.daemon_installed_summary
+                            else -> Res.string.install_daemon_summary
+                        },
+                    ),
+                )
+            },
+            enabled = !installing && !takingOver,
+            onClick = {
+                if (installing) return@Preference
+                installing = true
+                scope.launch {
+                    try {
+                        val result = withContext(Dispatchers.IO) { installDaemon() }
+                        when (result) {
+                            DaemonInstallResult.Success -> {
+                                runCatching {
+                                    repository.reattachDaemon()
+                                }.onFailure {
+                                    Logs.w("reattach after daemon install failed", it)
+                                    showMessage(it.readableMessage)
+                                    return@launch
+                                }
+                                showMessage(getString(Res.string.daemon_install_success))
                             }
-                            showMessage(getString(Res.string.daemon_install_success))
-                        }
 
-                        DaemonInstallResult.Cancelled -> {
-                            showMessage(getString(Res.string.daemon_install_cancelled))
-                        }
+                            DaemonInstallResult.Cancelled -> {
+                                showMessage(getString(Res.string.daemon_install_cancelled))
+                            }
 
-                        is DaemonInstallResult.ElevationUnavailable -> {
-                            showMessage(
-                                getString(
-                                    Res.string.daemon_install_no_elevation,
-                                    result.program,
-                                ),
-                            )
-                        }
+                            is DaemonInstallResult.ElevationUnavailable -> {
+                                showMessage(
+                                    getString(
+                                        Res.string.daemon_install_no_elevation,
+                                        result.program,
+                                    ),
+                                )
+                            }
 
-                        is DaemonInstallResult.Failed -> {
-                            showMessage(
-                                getString(Res.string.daemon_install_failed, result.message),
-                            )
+                            is DaemonInstallResult.Failed -> {
+                                showMessage(
+                                    getString(Res.string.daemon_install_failed, result.message),
+                                )
+                            }
                         }
+                    } finally {
+                        installing = false
                     }
-                } finally {
-                    installing = false
                 }
-            }
-        },
-    )
+            },
+        )
+    }
 
     if (foreignOwner != null) {
         Preference(
@@ -373,6 +378,22 @@ internal actual fun PlatformGeneralOptions(needReload: () -> Unit) {
 
 @Composable
 internal actual fun PlatformRouteOptions(needReload: () -> Unit, isVpnMode: Boolean) {
+    val networkManagerValue by DataStore.networkManagerTun.collectAsStateWithLifecycle()
+    val networkManager = PlatformInfo.isLinux && networkManagerValue
+    if (PlatformInfo.isLinux) {
+        SwitchPreference(
+            value = networkManagerValue,
+            onValueChange = {
+                DataStore.networkManagerTun.setBlocking(it)
+                needReload()
+            },
+            title = { Text(stringResource(Res.string.network_manager_tun)) },
+            summary = { Text(stringResource(Res.string.network_manager_tun_summary)) },
+            icon = { MaskedIcon(Res.drawable.arrow_and_edge, color = IconMaskColors.IconCyan) },
+            enabled = isVpnMode,
+        )
+    }
+
     val tunInterfaceNameValue by DataStore.tunInterfaceName.collectAsStateWithLifecycle()
     TextFieldPreference(
         value = tunInterfaceNameValue,
@@ -418,7 +439,7 @@ internal actual fun PlatformRouteOptions(needReload: () -> Unit, isVpnMode: Bool
                 color = IconMaskColors.IconCyan,
             )
         },
-        enabled = isVpnMode,
+        enabled = isVpnMode && !networkManager,
     )
     if (PlatformInfo.isLinux) {
         val autoRedirectValue by DataStore.tunAutoRedirect.collectAsStateWithLifecycle()
@@ -435,7 +456,7 @@ internal actual fun PlatformRouteOptions(needReload: () -> Unit, isVpnMode: Bool
                     color = IconMaskColors.IconLightGreen,
                 )
             },
-            enabled = isVpnMode,
+            enabled = isVpnMode && !networkManager,
         )
     }
 

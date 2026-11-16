@@ -11,8 +11,12 @@ import fr.husi.database.preference.reset
 import fr.husi.fmt.LOCALHOST4
 import fr.husi.fmt.socks.SOCKSBean
 import fr.husi.ktx.applyDefaultValues
-import fr.husi.proto.v1.getDaemonInfoResponse
-import fr.husi.proto.v1.ownership
+import fr.husi.platform.PlatformInfo
+import fr.husi.proto.v1.Capabilities
+import fr.husi.proto.v1.GetDaemonInfoResponse
+import fr.husi.proto.v1.Hosting
+import fr.husi.proto.v1.Ownership
+import fr.husi.proto.v1.TunBackend
 import fr.husi.test.FakeCoreClient
 import fr.husi.test.HusiKoinTest
 import kotlinx.coroutines.CancellationException
@@ -89,30 +93,120 @@ class CoreHostControllerTest : HusiKoinTest() {
     }
 
     @Test
-    fun `foreign-owned daemon attaches read-only and does not take over`() = runTest {
-        val info = getDaemonInfoResponse {
-            ownership = ownership {
-                claimed = true
-                ownedByCaller = false
-                ownerName = "alice"
-                ownerId = "1001"
-            }
+    fun `host discovery prefers an accessible daemon over spawning a session`() {
+        tempDir.resolve("api.sock").createNewFile()
+        val daemon = FakeCoreClient().also {
+            it.nextDaemonInfo = GetDaemonInfoResponse(
+                hosting = Hosting.HOSTING_DAEMON,
+                api_version = CoreHostController.API_VERSION,
+                ownership = Ownership(),
+            )
         }
+        val discovery = CoreHostController(
+            repository,
+            resolveCoreClient = { fakeClient },
+            resolveCoreBinary = { error("Must use the available daemon") },
+            dispatcher = dispatcher,
+            daemonBasePath = tempDir.path,
+            createDaemonClient = { daemon },
+        )
+        try {
+            discovery.ensureHost()
+            assertTrue(discovery.hostState.value.isDaemon)
+            assertEquals(tempDir.path, repository.coreSocketBasePath)
+            assertEquals(1, daemon.probeCalls)
+        } finally {
+            discovery.shutdownHost()
+        }
+    }
+
+    @Test
+    fun `missing inaccessible and broken daemon connections attempt the session core`() {
+        for (failure in listOf(null, IOException("Permission denied"), IOException("Connection refused"))) {
+            val socket = tempDir.resolve("api.sock")
+            socket.delete()
+            if (failure != null) socket.createNewFile()
+            val daemon = FakeCoreClient().also { it.probeThrowable = failure }
+            var sessionAttempted = false
+            val discovery = CoreHostController(
+                repository,
+                resolveCoreClient = { fakeClient },
+                resolveCoreBinary = {
+                    sessionAttempted = true
+                    null
+                },
+                dispatcher = dispatcher,
+                daemonBasePath = tempDir.path,
+                createDaemonClient = { daemon },
+            )
+            assertFailsWith<IOException> { discovery.ensureHost() }
+            assertTrue(sessionAttempted)
+            assertFalse(discovery.hostState.value.isDaemon)
+            assertEquals(
+                if (failure == null && !PlatformInfo.isWindows) {
+                    0
+                } else {
+                    1
+                },
+                daemon.probeCalls,
+            )
+        }
+    }
+
+    @Test
+    fun `foreign-owned daemon attaches read-only and does not take over`() = runTest {
+        val info = GetDaemonInfoResponse(
+            ownership = Ownership(
+                claimed = true,
+                owned_by_caller = false,
+                owner_name = "alice",
+                owner_id = "1001",
+            ),
+        )
 
         controller.tryClaimDaemon(fakeClient, info)
 
         assertEquals(0, fakeClient.takeOverServiceCalls)
+        assertEquals(0, fakeClient.claimServiceCalls)
+        assertEquals(
+            DaemonOwner(name = "alice", id = "1001"), controller.hostState.value.foreignOwner,
+        )
+    }
+
+    @Test
+    fun `missing ownership is a response error and never claims the daemon`() = runTest {
+        val error = assertFailsWith<IOException> {
+            controller.tryClaimDaemon(fakeClient, GetDaemonInfoResponse())
+        }
+
+        assertEquals("Daemon response omitted ownership information", error.message)
+        assertEquals(0, fakeClient.claimServiceCalls)
+        assertEquals(0, fakeClient.takeOverServiceCalls)
+    }
+
+    @Test
+    fun `missing ownership after takeover keeps the conflict and does not claim`() = runTest {
+        val foreign = GetDaemonInfoResponse(
+            ownership = Ownership(
+                claimed = true,
+                owned_by_caller = false,
+                owner_name = "alice",
+                owner_id = "1001",
+            ),
+        )
+        controller.tryClaimDaemon(fakeClient, foreign)
+        fakeClient.nextDaemonInfo = GetDaemonInfoResponse()
+
+        assertFailsWith<IOException> { controller.takeOverDaemon() }
+
+        assertEquals(1, fakeClient.takeOverServiceCalls)
         assertEquals(0, fakeClient.claimServiceCalls)
         assertEquals(DaemonOwner(name = "alice", id = "1001"), controller.hostState.value.foreignOwner)
     }
 
     @Test
     fun `unowned daemon claims without recording a conflict`() = runTest {
-        val info = getDaemonInfoResponse {
-            ownership = ownership {
-                claimed = false
-            }
-        }
+        val info = GetDaemonInfoResponse(ownership = Ownership(claimed = false))
 
         controller.tryClaimDaemon(fakeClient, info)
 
@@ -123,14 +217,14 @@ class CoreHostControllerTest : HusiKoinTest() {
 
     @Test
     fun `own daemon does not claim or take over`() = runTest {
-        val info = getDaemonInfoResponse {
-            ownership = ownership {
-                claimed = true
-                ownedByCaller = true
-                ownerName = "me"
-                ownerId = "1000"
-            }
-        }
+        val info = GetDaemonInfoResponse(
+            ownership = Ownership(
+                claimed = true,
+                owned_by_caller = true,
+                owner_name = "me",
+                owner_id = "1000",
+            ),
+        )
 
         controller.tryClaimDaemon(fakeClient, info)
 
@@ -141,23 +235,23 @@ class CoreHostControllerTest : HusiKoinTest() {
 
     @Test
     fun `takeOverDaemon calls takeOverService and clears the conflict`() = runTest {
-        val foreign = getDaemonInfoResponse {
-            ownership = ownership {
-                claimed = true
-                ownedByCaller = false
-                ownerName = "bob"
-                ownerId = "1002"
-            }
-        }
+        val foreign = GetDaemonInfoResponse(
+            ownership = Ownership(
+                claimed = true,
+                owned_by_caller = false,
+                owner_name = "bob",
+                owner_id = "1002",
+            ),
+        )
         controller.tryClaimDaemon(fakeClient, foreign)
-        fakeClient.nextDaemonInfo = getDaemonInfoResponse {
-            ownership = ownership {
-                claimed = true
-                ownedByCaller = true
-                ownerName = "me"
-                ownerId = "1000"
-            }
-        }
+        fakeClient.nextDaemonInfo = GetDaemonInfoResponse(
+            ownership = Ownership(
+                claimed = true,
+                owned_by_caller = true,
+                owner_name = "me",
+                owner_id = "1000",
+            ),
+        )
 
         controller.takeOverDaemon()
 
@@ -168,11 +262,7 @@ class CoreHostControllerTest : HusiKoinTest() {
 
     @Test
     fun `takeOverDaemon claims when the daemon reports unclaimed after takeover`() = runTest {
-        fakeClient.nextDaemonInfo = getDaemonInfoResponse {
-            ownership = ownership {
-                claimed = false
-            }
-        }
+        fakeClient.nextDaemonInfo = GetDaemonInfoResponse(ownership = Ownership(claimed = false))
 
         controller.takeOverDaemon()
 
@@ -183,14 +273,14 @@ class CoreHostControllerTest : HusiKoinTest() {
 
     @Test
     fun `takeOverDaemon leaves the conflict in place when takeover fails`() = runTest {
-        val foreign = getDaemonInfoResponse {
-            ownership = ownership {
-                claimed = true
-                ownedByCaller = false
-                ownerName = "carol"
-                ownerId = "1003"
-            }
-        }
+        val foreign = GetDaemonInfoResponse(
+            ownership = Ownership(
+                claimed = true,
+                owned_by_caller = false,
+                owner_name = "carol",
+                owner_id = "1003",
+            ),
+        )
         controller.tryClaimDaemon(fakeClient, foreign)
         fakeClient.takeOverServiceThrowable = IOException("denied")
 
@@ -199,7 +289,9 @@ class CoreHostControllerTest : HusiKoinTest() {
         }
 
         assertEquals(0, fakeClient.takeOverServiceCalls)
-        assertEquals(DaemonOwner(name = "carol", id = "1003"), controller.hostState.value.foreignOwner)
+        assertEquals(
+            DaemonOwner(name = "carol", id = "1003"), controller.hostState.value.foreignOwner,
+        )
     }
 
     private suspend fun createSocksProfile(): Long {
@@ -344,6 +436,72 @@ class CoreHostControllerTest : HusiKoinTest() {
             assertEquals(0, backend.disableCalls)
             assertFalse(DataStore.systemProxy.get())
         }
+
+    @Test
+    fun `NetworkManager session can start VPN without the system daemon`() = runTest(dispatcher.scheduler) {
+        if (!PlatformInfo.isLinux) return@runTest
+        val (sessionController, _) = newSystemProxyController()
+        DataStore.serviceMode.set(Key.MODE_VPN)
+        DataStore.networkManagerTun.set(true)
+        fakeClient.nextDaemonInfo = GetDaemonInfoResponse(capabilities = Capabilities(network_manager_tun = true))
+        DataStore.selectedProxy.set(createSocksProfile())
+        sessionController.attachHostForTest(daemon = false)
+        sessionController.attachSessionProcessForTest(ControllableProcess())
+
+        sessionController.startLockedForTest()
+
+        assertEquals(1, fakeClient.startServiceCalls)
+        assertEquals(ServiceState.Connected, DataStore.serviceState)
+        assertFalse(sessionController.hostState.value.isDaemon)
+        assertEquals(TunBackend.TUN_BACKEND_NETWORK_MANAGER, fakeClient.lastStartServiceRequest?.options?.tun_backend)
+        sessionController.stop()
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `NetworkManager is sent to the attached daemon without changing hosts`() = runTest(dispatcher.scheduler) {
+        if (!PlatformInfo.isLinux) return@runTest
+        val (daemonController, _) = newSystemProxyController()
+        DataStore.serviceMode.set(Key.MODE_VPN)
+        DataStore.networkManagerTun.set(true)
+        DataStore.selectedProxy.set(createSocksProfile())
+        fakeClient.nextDaemonInfo = GetDaemonInfoResponse(capabilities = Capabilities(network_manager_tun = true))
+        daemonController.attachHostForTest(daemon = true)
+
+        daemonController.startLockedForTest()
+
+        assertTrue(daemonController.hostState.value.isDaemon)
+        assertEquals(ServiceState.Connected, DataStore.serviceState)
+        assertEquals(TunBackend.TUN_BACKEND_NETWORK_MANAGER, fakeClient.lastStartServiceRequest?.options?.tun_backend)
+
+        daemonController.stop()
+        advanceUntilIdle()
+        DataStore.networkManagerTun.set(false)
+        daemonController.startLockedForTest()
+
+        assertTrue(daemonController.hostState.value.isDaemon)
+        assertEquals(2, fakeClient.startServiceCalls)
+        assertEquals(TunBackend.TUN_BACKEND_NATIVE, fakeClient.lastStartServiceRequest?.options?.tun_backend)
+        daemonController.stop()
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `NetworkManager rejects a host that predates backend selection`() = runTest(dispatcher.scheduler) {
+        if (!PlatformInfo.isLinux) return@runTest
+        val (daemonController, _) = newSystemProxyController()
+        DataStore.serviceMode.set(Key.MODE_VPN)
+        DataStore.networkManagerTun.set(true)
+        DataStore.selectedProxy.set(createSocksProfile())
+        daemonController.attachHostForTest(daemon = true)
+
+        daemonController.startLockedForTest()
+
+        assertEquals(0, fakeClient.startServiceCalls)
+        assertTrue(daemonController.hostState.value.isDaemon)
+        daemonController.stop()
+        advanceUntilIdle()
+    }
 
     @Test
     fun `retries until the host serves requests`() = runTest {

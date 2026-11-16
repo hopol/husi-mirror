@@ -251,7 +251,7 @@ make desktop_package_linux LINUX_PACKAGE_FORMATS=deb,pacman
 
 ### Installing without root
 
-`deb`, `rpm` and `pacman` all need a package manager and therefore root. Two other
+`deb`, `rpm` and `pacman` all need a package manager and therefore root. Three other
 formats do not, which is what makes husi usable on a managed machine — a lab, a
 work laptop, a school computer:
 
@@ -270,9 +270,9 @@ registers a desktop entry and icon under `$XDG_DATA_HOME` with absolute paths, s
 the application menu and the URL schemes work whether or not `<prefix>/bin` is on
 `PATH`. It leaves a matching `uninstall.sh` next to the installed tree. Without
 `--with-daemon` nothing ever asks for privileges; husi still runs as a local
-proxy, and only TUN needs the daemon, which Settings can install later.
+proxy, and TUN can use either NetworkManager or the daemon, which Settings can install later.
 
-`appimage` is a single self-contained file. Unlike every other Linux format it
+`appimage` is a single self-contained file. Like Flatpak, it
 bundles its own Java runtime — linked with `jlink` from the JDK modules the app
 actually uses (the module list is shared with the Windows JBR packages, in
 [`release/desktop/jre-modules.sh`](release/desktop/jre-modules.sh)) — so it does not require a system Java 21 at all. Its glibc floor
@@ -289,7 +289,11 @@ make desktop_package_linux DESKTOP_TARGET=linux/arm64 \
 # or with modules you already have: JBR_JMODS=/path/to/jbrsdk/jmods
 ```
 
-Neither format is built by default, but releases ship both.
+`flatpak` bundles the same Java runtime, launcher, jar, core and Cronet library.
+Install the Flatpak tooling (`flatpak` and `jlink`) and the target architecture's
+runtimes before building; cross-compiling also needs the target's `objcopy`, as
+for AppImage. Runtime versions are shared with CI in
+[`release/linux/flatpak/config.sh`](release/linux/flatpak/config.sh):
 
 The daemon is the one privileged piece in all of this. The native packages install
 and enable it themselves; everywhere else it is an explicit, optional step, either
@@ -371,7 +375,7 @@ User config files are created under:
 * `~/Library/Application Support/husi/desktop-java-opts.conf` for JVM options
 * `~/Library/Application Support/husi/desktop-app-args.conf` for application startup arguments
 
-Build Windows portable zip and NSIS installer packages:
+Build Windows portable zip and MSI installer packages:
 
 ```shell
 make desktop_package_windows DESKTOP_TARGET=windows/amd64
@@ -383,7 +387,7 @@ Required host tools:
 * `zig`
 * `git`
 * `python3`
-* `makensis` (NSIS)
+* `nfpm` v2.49.0 or newer
 * `osslsigncode` (unless building with `WINDOWS_NO_SIGN=1`, see below)
 
 Default output directory:
@@ -395,25 +399,28 @@ composeApp/build/compose/packages/windows/
 Outputs:
 
 * `<PACKAGE_NAME>-<VERSION_NAME>-windows-<arch>.zip`
-* `<PACKAGE_NAME>-<VERSION_NAME>-windows-<arch>-installer.exe`
+* `<PACKAGE_NAME>-<VERSION_NAME>-windows-<arch>.msi`
 
-The installer is a per-user NSIS installer that installs into `%LOCALAPPDATA%\Programs\Husi`, creates a Start Menu
-shortcut, and registers the configured URL schemes for the current user. The Windows launcher is unprivileged.
-Privileges live in the `husi-core` daemon installed as a Windows service (`husi-core service install`); TUN requires the
-daemon. Without it the UI falls back to an unprivileged session host.
+The MSI installs into `%LOCALAPPDATA%\Programs\Husi` for the current user without elevation, creates Start Menu
+and desktop shortcuts, and registers the configured URL schemes. To choose another directory, run
+`msiexec /i <package>.msi INSTALLFOLDER="C:\path\to\Husi"`; add `/qn` for a silent install.
 
-The UI and the daemon therefore install to **two different places**, and both hold a copy of `husi-core.exe`:
+**Migrating from NSIS:** uninstall the old NSIS installation before installing the MSI. The MSI does not migrate
+its uninstall entry or take ownership of its files. User configuration remains in the application data directory.
 
-| What                                           | Where                          | Installed by                               |
-|------------------------------------------------|--------------------------------|--------------------------------------------|
-| UI (launcher, jar, and the core it ships)      | `%LOCALAPPDATA%\Programs\Husi` | the NSIS installer, per user, no elevation |
-| Daemon (the core the service runs)             | `%ProgramFiles%\husi`          | `husi-core service install`, elevated      |
-| Daemon state (snapshots, ownership)            | `%ProgramData%\husi`           | the daemon itself                          |
+The Windows launcher is unprivileged. TUN requires the `husi-core` daemon installed as a Windows service.
+Install or update it from the application's service settings, which request administrator rights separately.
+The MSI does not install or remove that service; without it the UI falls back to an unprivileged session host.
 
-The installer runs `husi-core.exe service install` from its own directory at the end, so the per-user copy is what seeds
-the Program Files copy — that is why the same file exists twice. The uninstaller reverses both, calling
-`husi-core.exe service uninstall` before removing its own directory. It does not pass `--purge`, so `%ProgramData%\husi`
-survives an uninstall; remove it by hand, or run `husi-core service uninstall --purge` yourself beforehand.
+| What                                      | Where                          | Installed by                          |
+|-------------------------------------------|--------------------------------|---------------------------------------|
+| UI (launcher, jar, and the core it ships)   | `%LOCALAPPDATA%\Programs\Husi` | the MSI, per user, no elevation        |
+| Daemon (the core the service runs)          | `%ProgramFiles%\husi`          | `husi-core service install`, elevated  |
+| Daemon state (snapshots, ownership)         | `%ProgramData%\husi`           | the daemon itself                     |
+
+If the service is no longer needed, run `husi-core service uninstall` from an elevated terminal before uninstalling
+the application. This preserves `%ProgramData%\husi`; add `--purge`
+to remove daemon state too. After an MSI upgrade, update an existing service from settings to deploy the new core.
 
 ##### ☕ Packages with a bundled runtime
 
@@ -426,7 +433,7 @@ make desktop_package_windows_jbr DESKTOP_TARGET=windows/amd64
 ```
 
 * `<PACKAGE_NAME>-<VERSION_NAME>-windows-<arch>-jbr.zip`
-* `<PACKAGE_NAME>-<VERSION_NAME>-windows-<arch>-jbr-installer.exe`
+* `<PACKAGE_NAME>-<VERSION_NAME>-windows-<arch>-jbr.msi`
 
 These carry a `runtime\` directory next to the launcher, linked with `jlink` from the modules of the
 [JetBrains Runtime](https://github.com/JetBrains/JetBrainsRuntime) — the JDK IntelliJ ships, whose Skia, HiDPI and font
@@ -481,7 +488,13 @@ Nothing in husi checks the signature at runtime.
 
 #### 🌐 Web dashboard (Wasm)
 
-Build with Node.js 26+, `protoc` (the version in [version.sh](./buildScript/init/version.sh)) and the project's JDK:
+Our webdashboard support both sing-box API and Clash API. The Clash API also supports [reF1nd/sing-box](https://github.com/reF1nd/sing-box) extension
+
+Application diagnostics are written to the browser console. Filter for `[husi` and enable Verbose
+to see request timing and subscription state changes. Background polling, subscription and routine
+operation failures are logged; connection and storage failures can also show a Snackbar.
+
+Build with Node.js 26+ and the project's JDK:
 
 ```shell
 make web
@@ -489,9 +502,39 @@ make web_run
 make web_zip
 ```
 
-No libcore binary, route assets or native plugin builds are needed. Output is under `composeApp/build/dist/wasmJs/productionExecutable/`; the ZIP is under `composeApp/build/distributions/`. Serve the files through HTTP(S), including all relative paths. Opening `index.html` through `file://` is not supported.
+No libcore binary, route assets, protoc or native plugin builds are needed. Output is under `composeApp/build/dist/wasmJs/productionExecutable/`; the ZIP is under `composeApp/build/distributions/`. Serve the files through HTTP(S), including all relative paths. Opening `index.html` through `file://` is not supported.
 
-Configure the [sing-box API service](https://sing-box.sagernet.org/configuration/service/api/) under the root `services` array (sing-box 1.14.0 or later). Add this entry to your existing configuration:
+##### Configure in core
+
+It is suggested to use online version instead of download, because we are developing rapidly.
+
+However, limited by the [Firefox LAN access bug of WebSocket](https://bugzilla.mozilla.org/show_bug.cgi?id=2081728), Firefox user would better use download version.
+
+###### sing-box
+
+[sing-box API service](https://sing-box.sagernet.org/configuration/service/api/):
+
+**Online**
+
+```json
+{
+  "services": [
+    {
+      "type": "api",
+      "access_control_allow_origin": [
+        "http://127.0.0.1",
+        "https://xchacha20-poly1305.github.io/husi"
+      ],
+      "access_control_allow_private_network": true,
+      "dashboard": {
+        "enabled": false
+      }
+    }
+  ]
+}
+```
+
+**Download**
 
 ```json
 {
@@ -505,6 +548,46 @@ Configure the [sing-box API service](https://sing-box.sagernet.org/configuration
     }
   ]
 }
+```
+
+[sing-box experimental Clash API](https://sing-box.sagernet.org/configuration/experimental/clash-api/)
+
+**Online**
+
+```json
+{
+  "experimental": {
+      "clash_api": {
+        "access_control_allow_origin": [
+          "http://127.0.0.1",
+          "https://xchacha20-poly1305.github.io/husi"
+        ],
+        "access_control_allow_private_network": true,
+      }
+  }
+}
+```
+
+**External**
+
+```json
+{
+  "experimental": {
+    "clash_api": {
+      "external_ui": "ui",
+      "external_ui_download_url": "https://github.com/xchacha20-poly1305/husi/archive/refs/heads/gh-pages.zip"
+    }
+  }
+}
+```
+
+###### mihomo
+
+**Download**
+
+```yaml
+external-ui: ui
+external-ui-url: "https://github.com/xchacha20-poly1305/husi/archive/refs/heads/gh-pages.zip"
 ```
 
 #### 🌈 Plugins

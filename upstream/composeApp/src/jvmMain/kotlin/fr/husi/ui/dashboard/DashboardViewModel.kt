@@ -20,7 +20,6 @@ import fr.husi.core.formatConnectionTime
 import fr.husi.core.remote.RemoteControlManager
 import fr.husi.core.urlTestOptions
 import fr.husi.database.DataStore
-import fr.husi.fmt.SingBoxOptions
 import fr.husi.fmt.proxyDisplayName
 import fr.husi.ktx.Logs
 import fr.husi.ktx.listByLineIgnoringComments
@@ -117,7 +116,6 @@ class DashboardViewModel(
         private val LOOP_INTERVAL = 1000L.milliseconds
         private val LOOP_INTERVAL_SECONDS = LOOP_INTERVAL.toDouble(DurationUnit.SECONDS)
 
-        private const val GROUP_URL_TEST_CONCURRENCY = 10
 
         internal const val MAX_CLOSED_CONNECTIONS = 1000
 
@@ -342,7 +340,7 @@ class DashboardViewModel(
         groupsJob = viewModelScope.launch {
             try {
                 coreClient.subscribeGroups().collect { groups ->
-                    latestGroups = groups.groupList
+                    latestGroups = groups.group
                     publishProxySets()
                 }
             } catch (e: Exception) {
@@ -353,7 +351,7 @@ class DashboardViewModel(
         outboundsJob = viewModelScope.launch {
             try {
                 coreClient.subscribeOutbounds().collect { list ->
-                    latestOutbounds = list.outboundsList
+                    latestOutbounds = list.outbounds
                     publishProxySets()
                 }
             } catch (e: Exception) {
@@ -376,7 +374,7 @@ class DashboardViewModel(
                 val status = coreClient.getClashModeStatus()
                 uiState.update { state ->
                     state.copy(
-                        clashModes = status.modeListList,
+                        clashModes = status.modeList,
                         selectedClashMode = status.currentMode,
                     )
                 }
@@ -635,7 +633,7 @@ class DashboardViewModel(
         if (events.reset) {
             connections.clear()
             closedConnectionOrder.clear()
-            for (event in events.eventsList) {
+            for (event in events.events) {
                 if (event.type != ConnectionEventType.CONNECTION_EVENT_NEW) {
                     continue
                 }
@@ -644,8 +642,10 @@ class DashboardViewModel(
             }
         } else {
             var changed = false
-            for (event in events.eventsList) {
-                if (handleConnectionEvent(event)) changed = true
+            for (event in events.events) {
+                if (handleConnectionEvent(event)) {
+                    changed = true
+                }
             }
             if (!changed) return
         }
@@ -667,6 +667,8 @@ class DashboardViewModel(
 
     private fun handleConnectionEvent(event: ConnectionEvent): Boolean {
         when (event.type) {
+            is ConnectionEventType.Unrecognized -> return false
+
             ConnectionEventType.CONNECTION_EVENT_NEW -> {
                 val connection = event.connection ?: return false
                 putConnection(event.id, connection.toDetailState())
@@ -706,8 +708,6 @@ class DashboardViewModel(
                 )
                 return true
             }
-
-            ConnectionEventType.UNRECOGNIZED -> return false
         }
     }
 
@@ -746,7 +746,7 @@ class DashboardViewModel(
                     displayType = proxyDisplayName(group.type),
                     selectable = group.selectable,
                     selected = group.selected,
-                    items = group.itemsList.map { item ->
+                    items = group.items.map { item ->
                         ProxyItem(
                             tag = item.tag,
                             type = item.type,
@@ -809,11 +809,22 @@ class DashboardViewModel(
         DataStore.connectionTestIgnoreHandshakeTime.get(),
     )
 
+    private val remoteUrlTest = RemoteUrlTestRunner { tag ->
+        val outbound = latestGroups.asSequence()
+            .flatMap { it.items.asSequence() }
+            .firstOrNull { it.tag == tag } ?: latestOutbounds.firstOrNull { it.tag == tag }
+        outbound?.let {
+            RemoteUrlTestResult(it.urlTestTime, it.urlTestDelay)
+        }
+    }
+
     private suspend fun urlTestOne(tag: String, link: String, timeoutMs: Int, options: URLTestOptions) {
         withUrlTesting(tag) {
             // Remote may be a vanilla sing-box daemon (StartedService only).
             if (isRemote) {
-                coreClient.daemonUrlTest(tag)
+                remoteUrlTest.test(tag) {
+                    coreClient.daemonUrlTest(tag)
+                }
             } else {
                 coreClient.urlTest(tag, link, timeoutMs, options)
             }
@@ -858,6 +869,8 @@ class DashboardViewModel(
                             val tag = items[index].tag
                             try {
                                 urlTestOne(tag, testURL, testTimeout, options)
+                            } catch (e: CancellationException) {
+                                throw e
                             } catch (e: Exception) {
                                 Logs.w(e)
                             }
@@ -889,7 +902,9 @@ class DashboardViewModel(
                 val server = DataStore.ipTestServers.get().listByLineIgnoringComments().randomOrNull()
                 if (server == null) {
                     uiState.update {
-                        it.copy(ipProbe = IPProbeState(error = StringOrRes.Res(Res.string.ip_test_no_servers)))
+                        it.copy(
+                            ipProbe = IPProbeState(error = StringOrRes.Res(Res.string.ip_test_no_servers)),
+                        )
                     }
                     return@launch
                 }
@@ -903,7 +918,11 @@ class DashboardViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                uiState.update { it.copy(ipProbe = it.ipProbe.copy(error = StringOrRes.Direct(e.readableMessage))) }
+                uiState.update {
+                    it.copy(
+                        ipProbe = it.ipProbe.copy(error = StringOrRes.Direct(e.readableMessage)),
+                    )
+                }
             } finally {
                 uiState.update { it.copy(ipProbe = it.ipProbe.copy(isDoing = false)) }
             }
@@ -931,33 +950,6 @@ class DashboardViewModel(
         DataStore.systemProxy.set(enabled)
     }
 }
-
-internal fun skipGroupUrlTest(item: ProxyItem): Boolean {
-    return item.type == SingBoxOptions.TYPE_DIRECT || item.type == SingBoxOptions.TYPE_BLOCK
-}
-
-internal fun expandUrlTestTargets(
-    items: List<ProxyItem>,
-    members: Map<String, List<ProxyItem>>,
-): List<ProxyItem> {
-    val visited = mutableSetOf<String>()
-    val leaves = mutableListOf<ProxyItem>()
-
-    fun walk(item: ProxyItem) {
-        if (!visited.add(item.tag)) return
-        val nested = members[item.tag]
-        if (nested == null) {
-            if (!skipGroupUrlTest(item)) leaves += item
-            return
-        }
-        for (member in nested) walk(member)
-    }
-
-    for (item in items) walk(item)
-    return leaves
-}
-
-
 
 private fun nextSpeedHistory(history: List<Float>, sample: Float): List<Float> {
     val sized = if (history.size == SPEED_HISTORY_SIZE) {

@@ -2,20 +2,20 @@ package fr.husi.repository
 
 import fr.husi.CORE_SOCKET_NAME
 import fr.husi.CertProvider
-import fr.husi.PLUGIN_CA_FILE
 import fr.husi.Key
+import fr.husi.PLUGIN_CA_FILE
 import fr.husi.bg.BackendState
 import fr.husi.bg.OpenConnectAuthWatcher
 import fr.husi.bg.OpenVPNAuthWatcher
-import fr.husi.bg.TailscaleNotificationWatcher
 import fr.husi.bg.ServiceAlert
 import fr.husi.bg.ServiceState
+import fr.husi.bg.TailscaleNotificationWatcher
 import fr.husi.bg.buildPluginSpecs
 import fr.husi.bg.initPlugins
 import fr.husi.bg.proto.TrafficLooper
-import fr.husi.core.KurpcCoreClient
 import fr.husi.core.CoreClient
 import fr.husi.core.CoreStateReconciliation
+import fr.husi.core.KurpcCoreClient
 import fr.husi.core.reconciliationFor
 import fr.husi.database.DataStore
 import fr.husi.database.ProfileManager
@@ -27,17 +27,19 @@ import fr.husi.ktx.readableMessage
 import fr.husi.platform.Platform
 import fr.husi.platform.PlatformInfo
 import fr.husi.plugin.PluginNotFoundException
-import fr.husi.proto.daemon.ServiceStatus as DaemonServiceStatus
+import fr.husi.proto.v1.ClientMetadata
 import fr.husi.proto.v1.GetDaemonInfoResponse
 import fr.husi.proto.v1.Hosting
+import fr.husi.proto.v1.Ownership
 import fr.husi.proto.v1.RootCertificateStore
-import fr.husi.proto.v1.clientMetadata
-import fr.husi.proto.v1.serviceOptions
-import fr.husi.proto.v1.startServiceRequest
+import fr.husi.proto.v1.ServiceOptions
+import fr.husi.proto.v1.StartServiceRequest
+import fr.husi.proto.v1.TunBackend
 import fr.husi.resources.Res
 import fr.husi.resources.invalid_server
 import fr.husi.resources.profile_empty
 import fr.husi.resources.service_failed
+import fr.husi.resources.tun_backend_required
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -62,6 +64,7 @@ import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
+import fr.husi.proto.daemon.ServiceStatus as DaemonServiceStatus
 
 data class CoreHostState(
     val isDaemon: Boolean = false,
@@ -86,6 +89,8 @@ internal class CoreHostController(
     private val resolveCoreBinary: () -> File? = ::resolveHusiCoreBinary,
     dispatcher: CoroutineDispatcher = Dispatchers.Default,
     private val systemProxyBackend: SystemProxyBackend = platformSystemProxyBackend(),
+    private val daemonBasePath: String = daemonSocketBasePath(),
+    private val createDaemonClient: (String) -> CoreClient = { path -> KurpcCoreClient.local { path } },
 ) {
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
     private val access = Mutex()
@@ -258,7 +263,7 @@ internal class CoreHostController(
     suspend fun takeOverDaemon() {
         access.withLock {
             coreClient.takeOverService()
-            val ownership = coreClient.getDaemonInfo().ownership
+            val ownership = coreClient.getDaemonInfo().requireOwnership()
             if (!ownership.claimed) {
                 coreClient.claimService()
             }
@@ -279,6 +284,9 @@ internal class CoreHostController(
     private fun runExclusive(block: suspend () -> Unit): Job = scope.launch {
         access.withLock { block() }
     }
+
+    private suspend fun useNetworkManagerTun() = PlatformInfo.isLinux
+        && DataStore.serviceMode.get() == Key.MODE_VPN && DataStore.networkManagerTun.get()
 
     private suspend fun ensureHostLocked() {
         // Already on a live daemon — just re-probe.
@@ -376,16 +384,20 @@ internal class CoreHostController(
     }
 
     private suspend fun adoptRunningServiceLocked() {
-        val metadata = runCatching { coreClient.getClientMetadata().clientMetadata }
-            .onFailure { Logs.w("read the client metadata of the adopted service", it) }
-            .getOrNull()
-        runningProfileName = metadata?.profileName?.blankAsNull()
+        val metadata = runCatching {
+            coreClient.getClientMetadata().client_metadata
+        }.onFailure {
+            Logs.w("read the client metadata of the adopted service", it)
+        }.getOrNull()
+        runningProfileName = metadata?.profile_name?.blankAsNull()
         changeState(ServiceState.Connected, runningProfileName)
         BackendState.setConnected(true)
         syncSystemProxyLocked()
 
         // Last: this one goes to disk, and the UI should not wait for it.
-        metadata?.profileId?.takeIf { it > 0L }?.let { DataStore.currentProfile.set(it) }
+        metadata?.profile_id?.takeIf { it > 0L }?.let {
+            DataStore.currentProfile.set(it)
+        }
     }
 
     /**
@@ -403,13 +415,13 @@ internal class CoreHostController(
      * point the shared [CoreClient] at the daemon, and mark ready.
      */
     private suspend fun tryAttachDaemonLocked(): Boolean {
-        val daemonPath = daemonSocketBasePath()
+        val daemonPath = daemonBasePath
         if (!daemonSocketPresent(daemonPath)) {
             Logs.d("no daemon socket at $daemonPath")
             return false
         }
 
-        val probeClient = KurpcCoreClient.local { daemonPath }
+        val probeClient = createDaemonClient(daemonPath)
         try {
             probeClient.probe()
             val info = probeClient.getDaemonInfo()
@@ -461,7 +473,7 @@ internal class CoreHostController(
     }
 
     private fun checkApiVersion(info: GetDaemonInfoResponse) {
-        val daemonVersion = info.apiVersion
+        val daemonVersion = info.api_version
         apiVersionMismatch = daemonVersion != API_VERSION
         if (apiVersionMismatch) {
             val message =
@@ -472,15 +484,17 @@ internal class CoreHostController(
         publishHostState()
     }
 
+    private fun GetDaemonInfoResponse.requireOwnership(): Ownership {
+        return ownership ?: throw IOException("Daemon response omitted ownership information")
+    }
+
     internal suspend fun tryClaimDaemon(client: CoreClient, info: GetDaemonInfoResponse) {
-        val ownership = info.ownership
-        if (ownership.claimed && !ownership.ownedByCaller) {
-            Logs.w(
-                "Daemon owned by ${ownership.ownerName} (${ownership.ownerId}); attaching read-only",
-            )
+        val ownership = info.requireOwnership()
+        if (ownership.claimed && !ownership.owned_by_caller) {
+            Logs.w("Daemon owned by ${ownership.owner_name} (${ownership.owner_id}); attaching read-only")
             foreignOwner = DaemonOwner(
-                name = ownership.ownerName,
-                id = ownership.ownerId,
+                name = ownership.owner_name,
+                id = ownership.owner_id,
             )
             publishHostState()
             return
@@ -537,9 +551,17 @@ internal class CoreHostController(
             }
 
             val isVPN = DataStore.serviceMode.get() == Key.MODE_VPN
-            if (isVPN && !connectedToDaemon) {
+            val networkManager = useNetworkManagerTun()
+            if (networkManager && coreClient.getDaemonInfo().capabilities?.network_manager_tun != true) {
+                throw IOException("This core host does not support NetworkManager TUN. Update husi-core.")
+            }
+            if (isVPN && !connectedToDaemon && !networkManager) {
                 stopLocked(
-                    "TUN mode requires the system daemon. Install it via Settings or switch to proxy mode.",
+                    if (PlatformInfo.isLinux) {
+                        repository.getString(Res.string.tun_backend_required)
+                    } else {
+                        "TUN mode requires the system daemon. Install it via Settings or switch to proxy mode."
+                    },
                 )
                 return
             }
@@ -555,17 +577,22 @@ internal class CoreHostController(
                 pluginConfigs = pluginConfigs,
             )
 
-            val request = startServiceRequest {
-                this.config = config.configJson
-                plugins.addAll(pluginSpecs)
-                options = serviceOptions {
-                    rootCertificates = rootCertificateStore(DataStore.certProvider.get())
-                }
-                clientMetadata = clientMetadata {
-                    profileId = profile.id
-                    profileName = profile.displayNameForService()
-                }
-            }
+            val request = StartServiceRequest(
+                config = config.configJson,
+                plugins = pluginSpecs,
+                options = ServiceOptions(
+                    root_certificates = rootCertificateStore(DataStore.certProvider.get()),
+                    tun_backend = if (networkManager) {
+                        TunBackend.TUN_BACKEND_NETWORK_MANAGER
+                    } else {
+                        TunBackend.TUN_BACKEND_NATIVE
+                    },
+                ),
+                client_metadata = ClientMetadata(
+                    profile_id = profile.id,
+                    profile_name = profile.displayNameForService(),
+                ),
+            )
             coreClient.startService(request)
             OpenConnectAuthWatcher.start()
             OpenVPNAuthWatcher.start()
@@ -906,10 +933,11 @@ internal class CoreHostController(
 
         /**
          * Parent directory of the Unix daemon UDS
-         * (`libcore/daemonhost.DefaultDaemonSocketPath` = `/var/run/husi/api.sock`).
+         * (`/var/run` aliases `/run` on Linux, including inside Flatpak).
          * [KurpcCoreClient] dials `basePath/api.sock`.
          */
         private const val DAEMON_SOCKET_DIR_UNIX = "/var/run/husi"
+        private const val DAEMON_SOCKET_DIR_LINUX = "/run/husi"
 
         /**
          * Windows protected named pipe
@@ -928,7 +956,8 @@ internal class CoreHostController(
          */
         internal fun daemonSocketBasePath(): String {
             return when (PlatformInfo.platform) {
-                Platform.Linux, Platform.MacOs -> DAEMON_SOCKET_DIR_UNIX
+                Platform.Linux -> DAEMON_SOCKET_DIR_LINUX
+                Platform.MacOs -> DAEMON_SOCKET_DIR_UNIX
                 Platform.Windows -> DAEMON_PIPE_PATH_WINDOWS
                 Platform.Android, Platform.Web -> error("impossible")
             }
