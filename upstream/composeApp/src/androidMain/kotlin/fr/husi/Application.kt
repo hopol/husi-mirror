@@ -2,16 +2,24 @@ package fr.husi
 
 import android.annotation.SuppressLint
 import android.app.Application
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.res.Configuration
 import android.os.Build
 import android.os.StrictMode
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.getSystemService
 import fr.husi.bg.AppChangeReceiver
 import fr.husi.bg.DefaultNetworkMonitor
+import fr.husi.bg.ProxyService
 import fr.husi.bg.RouteAssetUpdater
+import fr.husi.bg.ServiceNotification
+import fr.husi.bg.ServiceRegistry
+import fr.husi.bg.ServiceState
 import fr.husi.bg.SubscriptionUpdater
+import fr.husi.bg.VpnService
 import fr.husi.bg.migrateCustomRouteAssets
 import fr.husi.compose.clearClipboardImageCache
 import fr.husi.database.DataStore
@@ -22,6 +30,7 @@ import fr.husi.ktx.Logs
 import fr.husi.ktx.invariantDirectoryPathString
 import fr.husi.ktx.runOnDefaultDispatcher
 import fr.husi.ktx.runOnIoDispatcher
+import fr.husi.ktx.runOnMainDispatcher
 import fr.husi.libcore.Libcore
 import fr.husi.libcore.loadCA
 import fr.husi.repository.AndroidRepository
@@ -31,11 +40,15 @@ import fr.husi.utils.CrashHandler
 import fr.husi.utils.PackageCache
 import fr.husi.utils.installBundledRuleSets
 import go.Seq
+import io.github.vinceglb.filekit.PlatformFile
+import io.github.vinceglb.filekit.createDirectories
+import io.github.vinceglb.filekit.resolve
 import kotlinx.coroutines.DEBUG_PROPERTY_NAME
 import kotlinx.coroutines.DEBUG_PROPERTY_VALUE_ON
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
-import java.io.File
+import kotlin.time.Duration.Companion.milliseconds
 import androidx.work.Configuration as WorkConfiguration
 
 class Application : Application(),
@@ -49,7 +62,7 @@ class Application : Application(),
         repository = SagerRepository(this, isMainProcess, isBgProcess)
     }
 
-    val externalAssets: File by lazy { getExternalFilesDir(null) ?: filesDir }
+    val externalAssets: PlatformFile by lazy { PlatformFile(getExternalFilesDir(null) ?: filesDir) }
     private val appId by lazy { packageName }
     private val process by lazy { tryGetProcessName() }
     val isMainProcess get() = process == appId
@@ -62,8 +75,15 @@ class Application : Application(),
         System.setProperty(DEBUG_PROPERTY_NAME, DEBUG_PROPERTY_VALUE_ON)
         Thread.setDefaultUncaughtExceptionHandler(CrashHandler)
 
+        if (isBgProcess) {
+            runOnMainDispatcher {
+                delay(500.milliseconds)
+                clearStaleServiceIfNeeded()
+            }
+        }
+
         if (isMainProcess) runOnIoDispatcher {
-            clearClipboardImageCache(cacheDir)
+            clearClipboardImageCache(PlatformFile(cacheDir))
         }
 
         if (isMainProcess) TaildropSendService.observe(this)
@@ -84,7 +104,7 @@ class Application : Application(),
             repository.updateNotificationChannels()
         }
 
-        externalAssets.mkdirs()
+        externalAssets.createDirectories()
         val isDebug = runBlocking { DataStore.advancedFeature(Key.ADVANCED_DEBUG) } != null
         if (!isDebug) {
             Logs.openFile(externalAssets.resolve(LOG_FILE_NAME), DataStore.logLevel.getBlocking())
@@ -131,11 +151,25 @@ class Application : Application(),
         )
     }
 
+    private fun clearStaleServiceIfNeeded() {
+        val activeState = ServiceRegistry.baseService?.data?.state
+        if (activeState != null && activeState != ServiceState.Stopped) return
+
+        val hasStaleNotification = getSystemService<NotificationManager>()
+            ?.activeNotifications
+            ?.any { it.id == ServiceNotification.NOTIFICATION_ID } == true
+        if (!hasStaleNotification) return
+
+        stopService(Intent(this, VpnService::class.java))
+        stopService(Intent(this, ProxyService::class.java))
+        NotificationManagerCompat.from(this).cancel(ServiceNotification.NOTIFICATION_ID)
+    }
+
     private fun initCore(isDebug: Boolean) {
         Seq.setContext(this)
         Libcore.initCore(
-            cacheDir.invariantDirectoryPathString(),
-            filesDir.invariantDirectoryPathString(),
+            PlatformFile(cacheDir).invariantDirectoryPathString(),
+            PlatformFile(filesDir).invariantDirectoryPathString(),
             externalAssets.invariantDirectoryPathString(),
             DataStore.logMaxLine.getBlocking(),
             DataStore.logLevel.getBlocking(),

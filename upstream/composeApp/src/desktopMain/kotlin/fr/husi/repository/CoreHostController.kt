@@ -15,15 +15,22 @@ import fr.husi.bg.initPlugins
 import fr.husi.bg.proto.TrafficLooper
 import fr.husi.core.CoreClient
 import fr.husi.core.CoreStateReconciliation
-import fr.husi.core.KurpcCoreClient
+import fr.husi.core.WireCoreClient
 import fr.husi.core.reconciliationFor
 import fr.husi.database.DataStore
 import fr.husi.database.ProfileManager
 import fr.husi.fmt.LOCALHOST4
 import fr.husi.fmt.buildConfig
 import fr.husi.ktx.Logs
+import fr.husi.ktx.atomicReplace
 import fr.husi.ktx.blankAsNull
+import fr.husi.ktx.canExecute
+import fr.husi.ktx.createPlatformTempFile
+import fr.husi.ktx.deleteBlocking
 import fr.husi.ktx.readableMessage
+import fr.husi.ktx.toAbsoluteFile
+import fr.husi.ktx.toJavaFile
+import fr.husi.ktx.writeText
 import fr.husi.platform.Platform
 import fr.husi.platform.PlatformInfo
 import fr.husi.plugin.PluginNotFoundException
@@ -35,11 +42,20 @@ import fr.husi.proto.v1.RootCertificateStore
 import fr.husi.proto.v1.ServiceOptions
 import fr.husi.proto.v1.StartServiceRequest
 import fr.husi.proto.v1.TunBackend
+import fr.husi.resolvePackagedLauncherExecutable
 import fr.husi.resources.Res
 import fr.husi.resources.invalid_server
 import fr.husi.resources.profile_empty
 import fr.husi.resources.service_failed
 import fr.husi.resources.tun_backend_required
+import io.github.vinceglb.filekit.PlatformFile
+import io.github.vinceglb.filekit.absolutePath
+import io.github.vinceglb.filekit.createDirectories
+import io.github.vinceglb.filekit.exists
+import io.github.vinceglb.filekit.isRegularFile
+import io.github.vinceglb.filekit.name
+import io.github.vinceglb.filekit.parent
+import io.github.vinceglb.filekit.resolve
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -56,11 +72,13 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.koin.core.context.GlobalContext
 import java.io.File
 import java.io.IOException
 import java.net.UnknownHostException
+import java.nio.file.Path
 import java.util.concurrent.TimeUnit
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
@@ -86,11 +104,14 @@ private enum class SessionTeardown {
 internal class CoreHostController(
     private val repository: DesktopRepository,
     private val resolveCoreClient: () -> CoreClient = { GlobalContext.get().get() },
-    private val resolveCoreBinary: () -> File? = ::resolveHusiCoreBinary,
+    private val resolveCoreBinary: () -> PlatformFile? = ::resolveHusiCoreBinary,
     dispatcher: CoroutineDispatcher = Dispatchers.Default,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val systemProxyBackend: SystemProxyBackend = platformSystemProxyBackend(),
     private val daemonBasePath: String = daemonSocketBasePath(),
-    private val createDaemonClient: (String) -> CoreClient = { path -> KurpcCoreClient.local { path } },
+    private val createDaemonClient: (String) -> CoreClient = { path ->
+        WireCoreClient.local { path }
+    },
 ) {
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
     private val access = Mutex()
@@ -98,7 +119,7 @@ internal class CoreHostController(
     private var runningProfileName: String? = null
     var trafficLooper: TrafficLooper? = null
         private set
-    private val cacheFiles = ArrayList<File>()
+    private val cacheFiles = ArrayList<PlatformFile>()
 
     private var sessionProcess: Process? = null
     private var sessionStdin: java.io.OutputStream? = null
@@ -162,7 +183,7 @@ internal class CoreHostController(
 
     private var systemProxyApplied = false
 
-    private val coreRunDir: File
+    private val coreRunDir: PlatformFile
         get() = repository.coreRunDir
 
     private val socketBasePath: String
@@ -233,26 +254,28 @@ internal class CoreHostController(
      * alone; only the UI client's connection is re-established.
      */
     suspend fun reattachDaemon() {
-        access.withLock {
-            if (connectedToDaemon) {
-                detachDaemonClientLocked()
-            } else {
-                discardingSession = true
-                try {
-                    if (hostReady && DataStore.serviceState.canStop) {
-                        stopLocked()
+        withContext(ioDispatcher) {
+            access.withLock {
+                if (connectedToDaemon) {
+                    detachDaemonClientLocked()
+                } else {
+                    discardingSession = true
+                    try {
+                        if (hostReady && DataStore.serviceState.canStop) {
+                            stopLocked()
+                        }
+                        closeSessionLocked()
+                    } finally {
+                        discardingSession = false
                     }
-                    closeSessionLocked()
-                } finally {
-                    discardingSession = false
                 }
+                triedDaemon = false
+                apiVersionMismatch = false
+                foreignOwner = null
+                publishHostState()
+                ensureHostLocked()
+                writeRootCertificatesLocked()
             }
-            triedDaemon = false
-            apiVersionMismatch = false
-            foreignOwner = null
-            publishHostState()
-            ensureHostLocked()
-            writeRootCertificatesLocked()
         }
     }
 
@@ -261,15 +284,17 @@ internal class CoreHostController(
      * that owner's client. Failures propagate so the UI can surface them.
      */
     suspend fun takeOverDaemon() {
-        access.withLock {
-            coreClient.takeOverService()
-            val ownership = coreClient.getDaemonInfo().requireOwnership()
-            if (!ownership.claimed) {
-                coreClient.claimService()
+        withContext(ioDispatcher) {
+            access.withLock {
+                coreClient.takeOverService()
+                val ownership = coreClient.getDaemonInfo().requireOwnership()
+                if (!ownership.claimed) {
+                    coreClient.claimService()
+                }
+                foreignOwner = null
+                startDaemonLease()
+                publishHostState()
             }
-            foreignOwner = null
-            startDaemonLease()
-            publishHostState()
         }
     }
 
@@ -326,7 +351,18 @@ internal class CoreHostController(
     private suspend fun writeRootCertificatesLocked() {
         try {
             val pem = coreClient.getRootCertificates(rootCertificateStore(DataStore.certProvider.get()))
-            repository.externalAssetsDir.resolve(PLUGIN_CA_FILE).writeText(pem)
+            withContext(ioDispatcher) {
+                val directory = repository.externalAssetsDir
+                val pending = createPlatformTempFile("husi-roots-", ".pem", directory)
+                try {
+                    pending.writeText(pem)
+                    pending.atomicReplace(directory.resolve(PLUGIN_CA_FILE))
+                } finally {
+                    pending.deleteBlocking()
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Logs.w("write root certificates", e)
         }
@@ -632,8 +668,8 @@ internal class CoreHostController(
         changeState(ServiceState.Stopping, runningProfileName)
         BackendState.setConnected(false)
 
-        syncSystemProxyLocked()
         cleanupLocked()
+        syncSystemProxyLocked()
         runningProfileName = null
 
         BackendState.reset()
@@ -665,10 +701,14 @@ internal class CoreHostController(
             }
         }
 
-        cacheFiles.forEach { file ->
-            runCatching { file.delete() }
+        if (cacheFiles.isNotEmpty()) {
+            withContext(ioDispatcher) {
+                for (file in cacheFiles) {
+                    runCatching { file.deleteBlocking() }
+                }
+            }
+            cacheFiles.clear()
         }
-        cacheFiles.clear()
     }
 
     private suspend fun stopBoxLocked(): Boolean {
@@ -723,35 +763,37 @@ internal class CoreHostController(
         foreignOwner = null
         publishHostState()
 
-        coreRunDir.mkdirs()
-        val binary = resolveCoreBinary()
-            ?: throw IOException("husi-core binary not found (looked in: ${describeHusiCoreSearchLocations()})")
+        val process = withContext(ioDispatcher) {
+            coreRunDir.createDirectories()
+            val binary = resolveCoreBinary()
+                ?: throw IOException("husi-core binary not found (looked in: ${describeHusiCoreSearchLocations()})")
 
-        // The host owns the socket file: it refuses to start on one another
-        // host still answers on, and clears it otherwise.
-        val socketPath = coreRunDir.resolve(CORE_SOCKET_NAME)
+            // The host owns the socket file: it refuses to start on one another
+            // host still answers on, and clears it otherwise.
+            val socketPath = coreRunDir.resolve(CORE_SOCKET_NAME)
 
-        val command = listOf(
-            binary.absolutePath,
-            "session",
-            "--dir",
-            coreRunDir.absolutePath,
-            "--socket",
-            socketPath.absolutePath,
-        )
-        Logs.i("starting core host: ${command.joinToString(" ")}")
+            val command = listOf(
+                binary.absolutePath(),
+                "session",
+                "--dir",
+                coreRunDir.absolutePath(),
+                "--socket",
+                socketPath.absolutePath(),
+            )
+            Logs.i("starting core host: ${command.joinToString(" ")}")
 
-        val process = ProcessBuilder(command)
-            .directory(coreRunDir)
-            .redirectOutput(ProcessBuilder.Redirect.INHERIT)
-            .redirectError(ProcessBuilder.Redirect.INHERIT)
-            .start()
+            ProcessBuilder(command)
+                .directory(coreRunDir.toJavaFile())
+                .redirectOutput(ProcessBuilder.Redirect.INHERIT)
+                .redirectError(ProcessBuilder.Redirect.INHERIT)
+                .start()
+        }
 
         sessionProcess = process
         sessionStdin = process.outputStream
 
         scope.launch {
-            val exit = runInterruptible(Dispatchers.IO) { process.waitFor() }
+            val exit = runInterruptible(ioDispatcher) { process.waitFor() }
             Logs.w("husi-core session exited with code $exit")
             access.withLock {
                 if (sessionProcess === process) {
@@ -817,7 +859,11 @@ internal class CoreHostController(
 
         val stdin = sessionStdin
         sessionStdin = null
-        runCatching { stdin?.close() }
+        if (stdin != null) {
+            withContext(ioDispatcher) {
+                runCatching { stdin.close() }
+            }
+        }
 
         val process = sessionProcess
         sessionProcess = null
@@ -828,12 +874,12 @@ internal class CoreHostController(
             return
         }
 
-        val exited = teardown == SessionTeardown.Graceful && runInterruptible(Dispatchers.IO) {
+        val exited = teardown == SessionTeardown.Graceful && runInterruptible(ioDispatcher) {
             process.waitFor(2, TimeUnit.SECONDS)
         }
         if (!exited) {
             process.destroy()
-            val forceExited = runInterruptible(Dispatchers.IO) {
+            val forceExited = runInterruptible(ioDispatcher) {
                 process.waitFor(1, TimeUnit.SECONDS)
             }
             if (!forceExited) {
@@ -854,12 +900,16 @@ internal class CoreHostController(
             DataStore.serviceState == ServiceState.Connected &&
             foreignOwner == null &&
             !DataStore.hasInboundAuth()
-        if (shouldApply == systemProxyApplied) return
         if (shouldApply) {
+            if (systemProxyApplied) return
             val port = DataStore.mixedPort.get()
             try {
-                systemProxyBackend.enable(LOCALHOST4, port)
+                withContext(ioDispatcher) {
+                    systemProxyBackend.enable(LOCALHOST4, port)
+                }
                 systemProxyApplied = true
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Logs.w("failed to set system proxy", e)
                 systemProxyApplied = false
@@ -870,10 +920,14 @@ internal class CoreHostController(
         }
     }
 
-    private fun clearOsSystemProxyLocked() {
-        if (!systemProxyApplied) return
+    private suspend fun clearOsSystemProxyLocked() {
+        if (!systemProxyApplied && !systemProxyBackend.needsCleanup) return
         try {
-            systemProxyBackend.disable()
+            withContext(ioDispatcher) {
+                systemProxyBackend.disable()
+            }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Logs.w("failed to clear system proxy", e)
         }
@@ -934,7 +988,7 @@ internal class CoreHostController(
         /**
          * Parent directory of the Unix daemon UDS
          * (`/var/run` aliases `/run` on Linux, including inside Flatpak).
-         * [KurpcCoreClient] dials `basePath/api.sock`.
+         * [WireCoreClient] dials `basePath/api.sock`.
          */
         private const val DAEMON_SOCKET_DIR_UNIX = "/var/run/husi"
         private const val DAEMON_SOCKET_DIR_LINUX = "/run/husi"
@@ -943,14 +997,14 @@ internal class CoreHostController(
          * Windows protected named pipe
          * (`libcore/coresvc.DaemonPipePath` /
          * `libcore/daemonhost.DefaultDaemonPipePath`).
-         * Passed to [KurpcCoreClient] as `basePath`; `localCoreTransport` detects
+         * Passed to [WireCoreClient] as `basePath`; `localCoreTransport` detects
          * the pipe prefix and dials it as-is (no `api.sock` join).
          */
         private const val DAEMON_PIPE_PATH_WINDOWS =
             """\\.\pipe\ProtectedPrefix\Administrators\husi"""
 
         /**
-         * Base path for [KurpcCoreClient].
+         * Base path for [WireCoreClient].
          * Unix: directory containing `api.sock`.
          * Windows: the full pipe path (see `localCoreTransport`).
          */
@@ -968,7 +1022,7 @@ internal class CoreHostController(
          * Windows named pipes are not, so we always attempt dial there.
          */
         internal fun daemonSocketPresent(basePath: String): Boolean {
-            return PlatformInfo.isWindows || File(basePath).resolve("api.sock").exists()
+            return PlatformInfo.isWindows || PlatformFile(basePath).resolve("api.sock").exists()
         }
     }
 }
@@ -986,14 +1040,18 @@ internal fun rootCertificateStore(certProvider: Int): RootCertificateStore = whe
  * 2. `libcore/build/<os>_<arch>/husi-core` relative to the working directory (dev)
  * 3. `PATH`
  */
-internal fun resolveHusiCoreBinary(): File? {
+internal fun resolveHusiCoreBinary(): PlatformFile? {
     val binaryName = husiCoreBinaryName()
 
-    resolvePackagedCoreSibling(binaryName)?.takeIf { it.canExecuteOrWindows() }?.let { return it }
+    resolvePackagedCoreSibling(binaryName)
+        ?.takeIf { it.canExecuteOrWindows() }
+        ?.let { return it }
 
-    devHusiCoreCandidates(binaryName)
-        .firstOrNull { it.isFile && it.canExecuteOrWindows() }
-        ?.let { return it.absoluteFile }
+    devHusiCoreCandidates(binaryName).firstOrNull {
+        it.isRegularFile() && it.canExecuteOrWindows()
+    }?.let {
+        return it.toAbsoluteFile()
+    }
 
     return resolveOnPath(binaryName)
 }
@@ -1002,14 +1060,14 @@ internal fun husiCoreBinaryName(): String {
     return if (PlatformInfo.isWindows) "husi-core.exe" else "husi-core"
 }
 
-private fun devHusiCoreCandidates(binaryName: String): List<File> {
+private fun devHusiCoreCandidates(binaryName: String): List<PlatformFile> {
     val relativePath = "libcore/build/${hostCoreBuildDirName()}/$binaryName"
     // Anchored on the JVM launch directory, so a `gradlew run` from the repository finds
     // the binary `make core_desktop` built.
-    val launchDir = File(System.getProperty("user.dir").orEmpty()).absoluteFile
+    val launchDir = PlatformFile(System.getProperty("user.dir").orEmpty()).toAbsoluteFile()
     return listOfNotNull(
         launchDir.resolve(relativePath),
-        launchDir.parentFile?.resolve(relativePath),
+        launchDir.parent()?.resolve(relativePath),
     )
 }
 
@@ -1020,7 +1078,7 @@ internal fun describeHusiCoreSearchLocations(): String {
     val locations = buildList {
         add("packaged sibling of the launcher/app")
         devHusiCoreCandidates(husiCoreBinaryName()).forEach {
-            add("${it.absolutePath} [isFile=${it.isFile} canExecute=${it.canExecute()}]")
+            add("${it.absolutePath()} [isFile=${it.isRegularFile()} canExecute=${it.canExecute()}]")
         }
         add("PATH")
     }
@@ -1030,26 +1088,26 @@ internal fun describeHusiCoreSearchLocations(): String {
 /**
  * Packaged-install sibling of the launcher / app tree (not the dev build dir).
  */
-private fun resolvePackagedCoreSibling(fileName: String): File? {
-    val launcher = fr.husi.resolvePackagedLauncherExecutable()
+private fun resolvePackagedCoreSibling(fileName: String): PlatformFile? {
+    val launcher = resolvePackagedLauncherExecutable()
     if (launcher != null) {
-        val sibling = launcher.parentFile?.resolve(fileName)
-        if (sibling != null && sibling.isFile) {
-            return sibling.absoluteFile
+        val sibling = launcher.parent()?.resolve(fileName)
+        if (sibling != null && sibling.isRegularFile()) {
+            return sibling.toAbsoluteFile()
         }
     }
 
     val codeSource = CoreHostController::class.java.protectionDomain?.codeSource?.location
         ?: return null
     val runtimePath = runCatching {
-        File(codeSource.toURI())
+        PlatformFile(Path.of(codeSource.toURI()).toString())
     }.getOrElse {
-        File(codeSource.path)
+        PlatformFile(codeSource.path)
     }
-    val appDir = runtimePath.parentFile
-        ?.takeIf { runtimePath.isFile && it.name == "app" }
+    val appDir = runtimePath.parent()
+        ?.takeIf { runtimePath.isRegularFile() && it.name == "app" }
         ?: return null
-    val appRoot = appDir.parentFile ?: return null
+    val appRoot = appDir.parent() ?: return null
 
     val searchDirs = when (PlatformInfo.platform) {
         Platform.Linux -> listOf(appRoot.resolve("bin"), appRoot)
@@ -1059,8 +1117,8 @@ private fun resolvePackagedCoreSibling(fileName: String): File? {
     }
     for (dir in searchDirs) {
         val candidate = dir.resolve(fileName)
-        if (candidate.isFile) {
-            return candidate.absoluteFile
+        if (candidate.isRegularFile()) {
+            return candidate.toAbsoluteFile()
         }
     }
     return null
@@ -1081,19 +1139,19 @@ private fun hostCoreBuildDirName(): String {
     return "${os}_$arch"
 }
 
-internal fun resolveOnPath(binaryName: String): File? {
+internal fun resolveOnPath(binaryName: String): PlatformFile? {
     val path = System.getenv("PATH") ?: return null
-    val separator = File.pathSeparatorChar
+    val separator = File.pathSeparator.single()
     for (entry in path.split(separator)) {
         if (entry.isBlank()) continue
-        val candidate = File(entry, binaryName)
-        if (candidate.isFile && candidate.canExecuteOrWindows()) {
-            return candidate.absoluteFile
+        val candidate = PlatformFile(entry).resolve(binaryName)
+        if (candidate.isRegularFile() && candidate.canExecuteOrWindows()) {
+            return candidate.toAbsoluteFile()
         }
     }
     return null
 }
 
-private fun File.canExecuteOrWindows(): Boolean {
+private fun PlatformFile.canExecuteOrWindows(): Boolean {
     return PlatformInfo.isWindows || canExecute()
 }

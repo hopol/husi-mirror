@@ -2,16 +2,17 @@ package fr.husi.cli
 
 import fr.husi.CORE_SOCKET_NAME
 import fr.husi.core.CoreClient
-import fr.husi.core.KurpcCoreClient
+import fr.husi.core.WireCoreClient
 import fr.husi.ktx.Logs
 import fr.husi.platform.PlatformInfo
 import fr.husi.repository.CoreHostController
+import io.github.vinceglb.filekit.PlatformFile
+import io.github.vinceglb.filekit.path
+import io.github.vinceglb.filekit.resolve
 import kotlinx.coroutines.runBlocking
-import java.io.File
-import javax.net.ssl.SSLSocketFactory
 
 fun connectClient(socketBasePath: String): CoreClient? {
-    val client = KurpcCoreClient.local { socketBasePath }
+    val client = WireCoreClient.local { socketBasePath }
     runCatching {
         runBlocking { client.probe() }
     }.onFailure {
@@ -50,13 +51,13 @@ internal fun connectExistingHost(
 
 /** Both socket paths [connectExistingHost] tries, for user-facing diagnostics. */
 fun hostSocketPaths(sessionBasePath: String): List<String> {
-    val sessionSocket = File(sessionBasePath, CORE_SOCKET_NAME).path
+    val sessionSocket = PlatformFile(sessionBasePath).resolve(CORE_SOCKET_NAME).path
     val daemonBasePath = CoreHostController.daemonSocketBasePath()
     val daemonSocket = if (PlatformInfo.isWindows) {
         // The Windows daemon endpoint is the named pipe itself, not a directory.
         daemonBasePath
     } else {
-        File(daemonBasePath, CORE_SOCKET_NAME).path
+        PlatformFile(daemonBasePath).resolve(CORE_SOCKET_NAME).path
     }
     return listOf(daemonSocket, sessionSocket)
 }
@@ -64,9 +65,7 @@ fun hostSocketPaths(sessionBasePath: String): List<String> {
 fun connectRemoteClient(serverURL: String, secret: String): CoreClient {
     // The CLI skips the runtime bootstrap, which writes the roots of the user's certificate
     // provider, so it trusts the platform default.
-    val client = KurpcCoreClient.remote(serverURL, secret) {
-        SSLSocketFactory.getDefault() as SSLSocketFactory
-    }
+    val client = WireCoreClient.remote(serverURL, secret)
     try {
         runBlocking { client.probe() }
     } catch (e: Exception) {

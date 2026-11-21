@@ -1,50 +1,139 @@
 package fr.husi.repository
 
-private const val NETWORKSETUP = "networksetup"
+import java.net.InetAddress
+import java.net.NetworkInterface
+
+internal data class MacOsProxyService(
+    val device: String?,
+    val enabled: Boolean,
+    val inCurrentSet: Boolean,
+    val values: Map<String, Any>,
+)
+
+internal interface MacOsProxyPreferences {
+    fun update(
+        trackedServices: Set<String>,
+        applyPending: Boolean,
+        changes: (Map<String, MacOsProxyService>) -> Map<String, Map<String, Any>>,
+        committed: (needsApply: Boolean) -> Unit,
+    )
+}
 
 internal class MacOsSystemProxyBackend(
-    private val runner: SystemCommandRunner = ProcessCommandRunner,
+    private val preferences: MacOsProxyPreferences = MacOsSystemConfiguration,
+    private val activeDevicesProvider: () -> Set<String> = ::detectActiveNetworkDevices,
 ) : SystemProxyBackend {
+
+    private var appliedServices = emptySet<String>()
+    private var applyPending = false
+
+    override val needsCleanup: Boolean
+        get() = appliedServices.isNotEmpty() || applyPending
+
     override fun enable(host: String, port: Int) {
-        forEachNetworkService { service -> networksetupEnableArgs(service, host, port) }
+        val activeDevices = activeDevicesProvider()
+        val requested = buildMap {
+            for ((enableKey, hostKey, portKey) in macOsProxyKeys) {
+                put(enableKey, 1)
+                put(hostKey, host)
+                put(portKey, port)
+            }
+        }
+        var targets = emptySet<String>()
+        preferences.update(
+            trackedServices = appliedServices,
+            applyPending = applyPending,
+            changes = { services ->
+                val eligible = services.filterValues { it.inCurrentSet && it.enabled }
+                targets = eligible.filterValues { it.device in activeDevices }.keys.ifEmpty { eligible.keys }
+                buildMap {
+                    for ((id, service) in services) {
+                        val fields = when (id) {
+                            in targets -> requested.filter { (key, value) ->
+                                service.values[key] != value
+                            }
+
+                            in appliedServices -> disabledFields(service)
+
+                            else -> continue
+                        }
+                        if (fields.isNotEmpty()) {
+                            put(id, fields)
+                        }
+                    }
+                }
+            },
+            committed = { needsApply ->
+                appliedServices = targets
+                applyPending = needsApply
+            },
+        )
+        applyPending = false
     }
 
     override fun disable() {
-        forEachNetworkService(::networksetupDisableArgs)
+        if (!needsCleanup) return
+        preferences.update(
+            trackedServices = appliedServices,
+            applyPending = applyPending,
+            changes = { services ->
+                buildMap {
+                    for (id in appliedServices) {
+                        val fields = services[id]?.let(::disabledFields).orEmpty()
+                        if (fields.isNotEmpty()) {
+                            put(id, fields)
+                        }
+                    }
+                }
+            },
+            committed = { needsApply ->
+                appliedServices = emptySet()
+                applyPending = needsApply
+            },
+        )
+        applyPending = false
     }
 
-    private fun forEachNetworkService(argsForService: (service: String) -> List<List<String>>) {
-        val output = runner.run(listOf(NETWORKSETUP, "-listallnetworkservices"))
-        for (service in parseNetworkServices(output)) {
-            for (args in argsForService(service)) {
-                runner.run(listOf(NETWORKSETUP) + args)
+    private fun disabledFields(service: MacOsProxyService): Map<String, Int> {
+        return buildMap {
+            for ((enableKey) in macOsProxyKeys) {
+                val enabled = service.values[enableKey]
+                if (enabled != null && enabled != 0) {
+                    put(enableKey, 0)
+                }
             }
         }
     }
 }
 
-/** Parses `networksetup -listallnetworkservices`: the first line is a legend, disabled services start with `*`. */
-internal fun parseNetworkServices(output: String): List<String> {
-    return output.lineSequence()
-        .drop(1)
-        .map { it.trim() }
-        .filter { it.isNotEmpty() && !it.startsWith("*") }
-        .toList()
+internal val macOsProxyKeys = listOf("HTTP", "HTTPS", "SOCKS").map {
+    listOf("${it}Enable", "${it}Proxy", "${it}Port")
 }
 
-internal fun networksetupEnableArgs(service: String, host: String, port: Int): List<List<String>> {
-    val portString = port.toString()
-    return listOf(
-        listOf("-setwebproxy", service, host, portString),
-        listOf("-setsecurewebproxy", service, host, portString),
-        listOf("-setsocksfirewallproxy", service, host, portString),
-    )
+/** Returns BSD names of up, non-loopback network interfaces holding at least one routable address. */
+internal fun detectActiveNetworkDevices(): Set<String> {
+    val interfaces = runCatching { NetworkInterface.getNetworkInterfaces() }.getOrNull() ?: return emptySet()
+    val result = LinkedHashSet<String>()
+    while (interfaces.hasMoreElements()) {
+        val networkInterface = interfaces.nextElement()
+        val name = networkInterface.name ?: continue
+        val active = runCatching {
+            networkInterface.isUp
+                && !networkInterface.isLoopback
+                && hasRoutableAddress(networkInterface.interfaceAddresses.mapNotNull { it.address })
+        }.getOrDefault(false)
+        if (active) {
+            result += name
+        }
+    }
+    return result
 }
 
-internal fun networksetupDisableArgs(service: String): List<List<String>> {
-    return listOf(
-        listOf("-setwebproxystate", service, "off"),
-        listOf("-setsecurewebproxystate", service, "off"),
-        listOf("-setsocksfirewallproxystate", service, "off"),
-    )
+internal fun hasRoutableAddress(addresses: Iterable<InetAddress>): Boolean {
+    return addresses.any {
+        !it.isLoopbackAddress
+            && !it.isLinkLocalAddress
+            && !it.isAnyLocalAddress
+            && !it.isMulticastAddress
+    }
 }

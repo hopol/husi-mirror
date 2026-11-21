@@ -21,10 +21,12 @@ import fr.husi.ktx.runOnDefaultDispatcher
 import fr.husi.net.WebDAVClient
 import fr.husi.net.WebDAVEntry
 import fr.husi.net.WebDAVServer
-import fr.husi.net.localSocks5Proxy
+import fr.husi.net.localHttpProxy
 import fr.husi.net.resolveWebDAVClient
 import fr.husi.repository.resolveRepository
-import java.io.File
+import io.github.vinceglb.filekit.PlatformFile
+import io.github.vinceglb.filekit.name
+import io.github.vinceglb.filekit.writeString
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -171,7 +173,7 @@ internal class BackupViewModel(
     }
 
     fun share(
-        launch: (File) -> Unit,
+        launch: (PlatformFile) -> Unit,
         onFailed: (message: String) -> Unit,
     ) = viewModelScope.launch(ioDispatcher) {
         try {
@@ -277,7 +279,7 @@ internal class BackupViewModel(
         url = DataStore.webdavURL.get(),
         username = DataStore.webdavUsername.get(),
         password = DataStore.webdavPassword.get(),
-        socks5 = localSocks5Proxy(),
+        proxy = localHttpProxy(),
     )
 
     fun clearInputResult() = viewModelScope.launch {
@@ -360,9 +362,9 @@ internal class BackupViewModel(
         }
     }
 
-    private suspend fun writeBackupFile(): File {
-        val file = File(resolveRepository().cacheDir, backupFileName())
-        file.writeText(createBackup())
+    private suspend fun writeBackupFile(): PlatformFile {
+        val file = PlatformFile(resolveRepository().cacheDir, backupFileName())
+        file.writeString(createBackup())
         return file
     }
 

@@ -21,12 +21,17 @@ import fr.husi.plugin.PluginManager
 import fr.husi.proto.v1.PluginFile
 import fr.husi.proto.v1.PluginProcessSpec
 import fr.husi.repository.resolveRepository
+import io.github.vinceglb.filekit.PlatformFile
+import io.github.vinceglb.filekit.absolutePath
+import io.github.vinceglb.filekit.createDirectories
+import io.github.vinceglb.filekit.isRegularFile
+import io.github.vinceglb.filekit.parent
+import io.github.vinceglb.filekit.resolve
 import okio.ByteString.Companion.encodeUtf8
-import java.io.File
 
 fun initPlugins(
     metadata: ConfigMetadata,
-    cacheFiles: MutableList<File>,
+    cacheFiles: MutableList<PlatformFile>,
 ): Map<Int, Pair<Int, String>> {
     val repository = resolveRepository()
     val pluginConfigs = hashMapOf<Int, Pair<Int, String>>()
@@ -47,8 +52,8 @@ fun initPlugins(
 
                 is HysteriaBean -> {
                     pluginConfigs[port] = profile.type to bean.buildHysteriaConfig(port, shouldProtect) { type ->
-                        File(repository.cacheDir, "hysteria_${System.currentTimeMillis()}.$type").also {
-                            it.parentFile?.mkdirs()
+                        PlatformFile(repository.cacheDir, "hysteria_${System.currentTimeMillis()}.$type").also {
+                            it.parent()?.createDirectories()
                             cacheFiles.add(it)
                         }
                     }
@@ -61,8 +66,8 @@ fun initPlugins(
                 is ShadowQUICBean -> {
                     pluginConfigs[port] = profile.type to
                         bean.buildShadowQUICConfig(port, shouldProtect, logLevel) { type ->
-                            File(repository.cacheDir, "shadowquic_${System.currentTimeMillis()}.$type").also {
-                                it.parentFile?.mkdirs()
+                            PlatformFile(repository.cacheDir, "shadowquic_${System.currentTimeMillis()}.$type").also {
+                                it.parent()?.createDirectories()
                                 cacheFiles.add(it)
                             }
                         }
@@ -83,9 +88,13 @@ fun buildPluginSpecs(
 
     val sharedEnv = linkedMapOf<String, String>()
     repository.externalAssetsDir.resolve(PLUGIN_CA_FILE)
-        .takeIf { it.isFile }
-        ?.absolutePath
-        ?.let { sharedEnv["SSL_CERT_FILE"] = it }
+        .takeIf { it.isRegularFile() }
+        ?.absolutePath()
+        ?.let {
+            sharedEnv["SSL_CERT_FILE"] = it
+            // Disable system directories.
+            sharedEnv["SSL_CERT_DIR"] = "/not_exists"
+        }
 
     for ((chain) in metadata.externalIndex) {
         chain.entries.forEach { (port, profile) ->
