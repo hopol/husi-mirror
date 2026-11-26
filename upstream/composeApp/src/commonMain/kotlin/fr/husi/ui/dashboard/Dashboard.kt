@@ -260,13 +260,20 @@ internal fun DashboardContent(
         }
     }
 
+    var isResumed by remember { mutableStateOf(false) }
     LifecycleResumeEffect(dashboardViewModel) {
+        isResumed = true
         dashboardViewModel.setDashboardActive(true)
-        onPauseOrDispose { dashboardViewModel.setDashboardActive(false) }
+        onPauseOrDispose {
+            isResumed = false
+            dashboardViewModel.setDashboardActive(false)
+        }
     }
 
-    LaunchedEffect(remoteSessionKey, targetConnected) {
-        dashboardViewModel.initialize(targetConnected)
+    LaunchedEffect(isResumed, remoteSessionKey, targetConnected) {
+        if (isResumed) {
+            dashboardViewModel.initialize(targetConnected)
+        }
     }
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     val hazeState = rememberHazeState()
@@ -570,6 +577,7 @@ internal fun DashboardContent(
                         selectProxy = { group, proxy ->
                             dashboardViewModel.selectOutbound(group, proxy)
                         },
+                        clearFixedProxy = dashboardViewModel::clearFixedProxy,
                         urlTestForSingle = dashboardViewModel::urlTestForSingle,
                         urlTestForGroup = dashboardViewModel::urlTestForGroup,
                         groupSearchTextFieldState = dashboardViewModel.proxyGroupSearchTextFieldState,
@@ -618,6 +626,7 @@ internal fun DashboardContent(
                 connection = connection,
                 resolveProcessInfo = dashboardViewModel::resolveProcessInfo,
                 closeConnection = dashboardViewModel::closeConnection,
+                blockSmartConnection = dashboardViewModel::blockSmartConnection,
                 onDismiss = { dashboardViewModel.selectConnection(null) },
                 openRouteSettings = onCreateRoute?.let { create ->
                     { fields, selectedConnection ->

@@ -166,6 +166,7 @@
     <string name="group_type">分组类型</string>
     <string name="subscription_type">订阅类型</string>
     <string name="age_identity">age 身份</string>
+    <string name="age_identity_invalid">请输入有效的 age 私钥，每行一个。</string>
     <string name="force_resolve">强制解析</string>
     <string name="force_resolve_sum">更新时解析所有域名到 IP 地址. 如果可能, 主机与服务器名称指示值将被自动覆盖</string>
     <string name="deduplication_sum">更新时移除重复配置</string>
@@ -236,6 +237,15 @@
     <string name="backup_groups_and_configurations">分组和配置</string>
     <string name="backup_summary">如果路由规则与配置一起备份，则自定义出站将丢失。</string>
     <string name="backup_rules">路由规则</string>
+    <string name="backup_age_recipient">age 公钥</string>
+    <string name="backup_age_recipient_optional">留空则生成未加密的备份。</string>
+    <string name="backup_age_recipient_invalid">请输入一把有效的 age 公钥。</string>
+    <string name="backup_age_private_key">age 私钥</string>
+    <string name="backup_age_identity_invalid">请输入一把有效的 age 私钥。</string>
+    <string name="backup_age_armor">ASCII armor</string>
+    <string name="backup_age_restore_title">解密备份</string>
+    <string name="backup_age_no_matching_identity">此 age 私钥无法解密这份备份。</string>
+    <string name="backup_age_decrypt_failed">无法读取这份加密备份。</string>
     <string name="webdav_configure">配置</string>
     <string name="webdav_directory_url">目录 URL</string>
     <string name="webdav_not_configured">未配置 WebDAV 服务器。</string>
@@ -445,11 +455,7 @@
     <string name="openvpn_control_wrap_type">控制通道保护</string>
     <string name="openvpn_control_wrap_key">控制通道密钥</string>
     <string name="openvpn_control_wrap_direction">控制通道密钥方向</string>
-    <string name="openconnect_authentication">OpenConnect 身份验证</string>
-    <string name="openvpn_authentication">OpenVPN 身份验证</string>
     <string name="clear_remembered_authentication_answers">清除已记住的身份验证答案</string>
-    <string name="later">稍后</string>
-    <string name="auth_verifying">正在验证…</string>
     <string name="auth_later_hint">您可以稍后在“仪表板 → 状态”中完成身份验证。</string>
     <string name="remote_connect_failed">无法连接到 %1$s</string>
     <string name="remote_disconnected_from">已与 %1$s 断开连接</string>
@@ -461,9 +467,6 @@
     <string name="app_update_installing">安装中…</string>
     <string name="app_update_install_failed">安装失败：%1$s</string>
     <string name="app_update_no_matching_asset">没有与此设备匹配的安装包。请打开发布页面手动下载。</string>
-    <plurals name="taildrop_received_notification">
-        <item quantity="other">收到 %1$d 个文件</item>
-    </plurals>
     <string name="taildrop_open_directory">打开接收目录</string>
     <string name="taildrop_open_download_directory">打开下载的文件</string>
     <string name="taildrop_no_targets">没有可接收文件的设备</string>

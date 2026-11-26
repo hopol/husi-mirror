@@ -36,6 +36,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
@@ -44,7 +45,9 @@ import kotlin.time.Duration.Companion.seconds
 
 internal class SingBoxSession(
     val client: RemoteClient,
-    private val onNativeUpdate: (SingBoxSession) -> Unit = {},
+    private val onTailscaleUpdate: (SingBoxSession, TailscaleStatusUpdate) -> Unit = { _, _ -> },
+    private val onOpenConnectUpdate: (SingBoxSession, OpenConnectStatusUpdate) -> Unit = { _, _ -> },
+    private val onOpenVPNUpdate: (SingBoxSession, OpenVPNStatusUpdate) -> Unit = { _, _ -> },
 ) : RemoteSession() {
     override val backend = RemoteBackend.SING_BOX
     var coreVersion by mutableStateOf<Version?>(null)
@@ -62,6 +65,7 @@ internal class SingBoxSession(
     var openVPN by mutableStateOf(OpenVPNStatusUpdate())
     var clashMode by mutableStateOf(ClashModeStatus())
     var serviceStatus by mutableStateOf("")
+    private var connectionsSubscribed = false
 
     private companion object {
         val INITIAL_RETRY_DELAY = 1.seconds
@@ -108,57 +112,103 @@ internal class SingBoxSession(
         client.close()
     }
 
-    override suspend fun observe(intervals: Flow<Int>) =
+    override suspend fun observe(
+        intervals: Flow<Int>,
+        subscriptions: Flow<Set<RemoteSubscription>>,
+    ) =
         supervisorScope {
             val service = client.service
             try {
-                subscribe(this, "SubscribeGroups", { service.SubscribeGroups().responses() }) {
-                    groups.clear()
-                    groups.addAll(it.group)
+                observeWhile(subscriptions.map { RemoteSubscription.PROXY_SET in it }) {
+                    subscribe(this, "SubscribeGroups", { service.SubscribeGroups().responses() }) {
+                        groups.clear()
+                        groups.addAll(it.group)
+                        publishDashboard()
+                    }
                 }
-                launch {
-                    intervals.collectLatest { interval ->
-                        coroutineScope {
-                            if (interval <= 0) return@coroutineScope
+                observeWhile(subscriptions.map { RemoteSubscription.STATS in it }) {
+                    launch {
+                        intervals.collectLatest { interval ->
+                            if (interval <= 0) return@collectLatest
                             val nanoseconds = interval.milliseconds.inWholeNanoseconds
-                            subscribe(
-                                this,
-                                "SubscribeStatus",
-                                { service.SubscribeStatus().responses(SubscribeStatusRequest(nanoseconds)) },
-                            ) {
-                                traffic = RemoteTraffic.fromStatus(it)
-                                history.add((traffic.upload + traffic.download).toFloat())
-                                if (history.size > 60) {
-                                    history.removeAt(0)
-                                }
-                            }
-                            subscribe(
-                                this,
-                                "SubscribeConnections",
-                                {
-                                    service.SubscribeConnections().responses(
-                                        SubscribeConnectionsRequest(nanoseconds),
-                                    )
-                                },
-                            ) { event ->
-                                applyConnectionEvents(connections, event, keepClosed = true)
-                                val closed = connections.entries.filter { it.value.closedAt > 0 }
-                                for (entry in closed.take((closed.size - 1000).fastCoerceAtLeast(0))) {
-                                    connections.remove(entry.key)
+                            coroutineScope {
+                                subscribe(
+                                    this,
+                                    "SubscribeStatus",
+                                    { service.SubscribeStatus().responses(SubscribeStatusRequest(nanoseconds)) },
+                                ) {
+                                    traffic = RemoteTraffic.fromStatus(it)
+                                    history.add((traffic.upload + traffic.download).toFloat())
+                                    if (history.size > 60) {
+                                        history.removeAt(0)
+                                    }
+                                    publishDashboard()
                                 }
                             }
                         }
                     }
-                }
-                subscribe(this, "SubscribeLog", { service.SubscribeLog().responses() }) { update ->
-                    if (update.reset) {
-                        logs.clear()
+                    subscribe(
+                        this,
+                        "SubscribeClashMode",
+                        { service.SubscribeClashMode().responses() },
+                    ) {
+                        clashMode = clashMode.copy(currentMode = it.mode)
+                        publishDashboard()
                     }
-                    logs.addAll(
-                        update.messages.map { RemoteLogEntry(it.level.toString(), it.message) },
-                    )
-                    while (logs.size > 2000) {
-                        logs.removeAt(0)
+                    launch {
+                        runCatching { service.GetClashModeStatus().execute() }
+                            .onSuccess {
+                                clashMode = it
+                                publishDashboard()
+                            }
+                            .onFailure {
+                                if (it is CancellationException) throw it
+                                Logs.w("GetClashModeStatus failed", it)
+                            }
+                    }
+                }
+                observeWhile(subscriptions.map { RemoteSubscription.CONNECTIONS in it }) {
+                    connectionsSubscribed = true
+                    try {
+                        intervals.collectLatest { interval ->
+                            if (interval <= 0) return@collectLatest
+                            val nanoseconds = interval.milliseconds.inWholeNanoseconds
+                            coroutineScope {
+                                subscribe(
+                                    this,
+                                    "SubscribeConnections",
+                                    {
+                                        service.SubscribeConnections().responses(
+                                            SubscribeConnectionsRequest(nanoseconds),
+                                        )
+                                    },
+                                ) { event ->
+                                    applyConnectionEvents(connections, event, keepClosed = true)
+                                    val closed = connections.entries.filter { it.value.closedAt > 0 }
+                                    for (entry in closed.take((closed.size - 1000).fastCoerceAtLeast(0))) {
+                                        connections.remove(entry.key)
+                                    }
+                                    publishDashboard()
+                                }
+                            }
+                        }
+                    } finally {
+                        connectionsSubscribed = false
+                        connections.clear()
+                        publishDashboard()
+                    }
+                }
+                observeWhile(subscriptions.map { RemoteSubscription.LOGS in it }) {
+                    subscribe(this, "SubscribeLog", { service.SubscribeLog().responses() }) { update ->
+                        if (update.reset) {
+                            logs.clear()
+                        }
+                        logs.addAll(
+                            update.messages.map { RemoteLogEntry(it.level.toString(), it.message) },
+                        )
+                        while (logs.size > 2000) {
+                            logs.removeAt(0)
+                        }
                     }
                 }
                 subscribe(
@@ -167,6 +217,7 @@ internal class SingBoxSession(
                     { service.SubscribeTailscaleStatus().responses() },
                 ) {
                     tailscale = it
+                    onTailscaleUpdate(this@SingBoxSession, it)
                 }
                 subscribe(
                     this,
@@ -174,7 +225,7 @@ internal class SingBoxSession(
                     { service.SubscribeOpenConnectStatus().responses() },
                 ) {
                     openConnect = it
-                    onNativeUpdate(this@SingBoxSession)
+                    onOpenConnectUpdate(this@SingBoxSession, it)
                 }
                 subscribe(
                     this,
@@ -182,14 +233,7 @@ internal class SingBoxSession(
                     { service.SubscribeOpenVPNStatus().responses() },
                 ) {
                     openVPN = it
-                    onNativeUpdate(this@SingBoxSession)
-                }
-                subscribe(
-                    this,
-                    "SubscribeClashMode",
-                    { service.SubscribeClashMode().responses() },
-                ) {
-                    clashMode = clashMode.copy(currentMode = it.mode)
+                    onOpenVPNUpdate(this@SingBoxSession, it)
                 }
                 subscribe(
                     this,
@@ -200,17 +244,6 @@ internal class SingBoxSession(
                     if (status !is ServiceStatus.Type.Unrecognized) {
                         serviceStatus = status.toString()
                     }
-                }
-                launch {
-                    runCatching { service.GetClashModeStatus().execute() }
-                        .onSuccess {
-                            clashMode = it
-                            publishDashboard()
-                        }
-                        .onFailure {
-                            if (it is CancellationException) throw it
-                            Logs.w("GetClashModeStatus failed", it)
-                        }
                 }
                 while (isActive) {
                     val remoteStartedAt = try {
@@ -244,7 +277,6 @@ internal class SingBoxSession(
                         retryDelay = INITIAL_RETRY_DELAY
                         this@launch.ensureActive()
                         receive(it)
-                        publishDashboard()
                     }
                 } catch (failure: Exception) {
                     if (failure is CancellationException) throw failure
@@ -257,37 +289,41 @@ internal class SingBoxSession(
             }
         }
     }
-}
 
-private fun SingBoxSession.dashboardState() = DashboardState(
-    isRemote = true,
-    txTotal = traffic.uploadTotal,
-    rxTotal = traffic.downloadTotal,
-    memory = traffic.memory,
-    goroutines = traffic.goroutines,
-    txRateProxy = traffic.upload,
-    rxRateProxy = traffic.download,
-    proxySpeedHistory = history.toList(),
-    selectedClashMode = clashMode.currentMode,
-    clashModes = clashMode.modeList,
-    connections = connections.values.map { it.toConnectionState() },
-    activeConnectionCount = connections.values.count { it.closedAt <= 0 },
-    proxySets = groups.map { group ->
-        ProxySet(
-            tag = group.tag,
-            displayType = group.type,
-            selectable = group.selectable,
-            selected = group.selected,
-            items = group.items.map {
-                ProxyItem(
-                    it.tag,
-                    it.type,
-                    it.urlTestDelay,
-                )
-            },
-        )
-    },
-)
+    private fun dashboardState() = DashboardState(
+        isRemote = true,
+        txTotal = traffic.uploadTotal,
+        rxTotal = traffic.downloadTotal,
+        memory = traffic.memory,
+        goroutines = traffic.goroutines,
+        txRateProxy = traffic.upload,
+        rxRateProxy = traffic.download,
+        proxySpeedHistory = history.toList(),
+        selectedClashMode = clashMode.currentMode,
+        clashModes = clashMode.modeList,
+        connections = connections.values.map { it.toConnectionState() },
+        activeConnectionCount = if (connectionsSubscribed) {
+            connections.values.count { it.closedAt <= 0 }
+        } else {
+            traffic.connectionsIn
+        },
+        proxySets = groups.map { group ->
+            ProxySet(
+                tag = group.tag,
+                displayType = group.type,
+                selectable = group.selectable,
+                selected = group.selected,
+                items = group.items.map {
+                    ProxyItem(
+                        it.tag,
+                        it.type,
+                        it.urlTestDelay,
+                    )
+                },
+            )
+        },
+    )
+}
 
 private fun Connection.toConnectionState() = ConnectionDetailState(
     uuid = id,

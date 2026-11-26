@@ -13,6 +13,7 @@ import fr.husi.ui.clash.ClashRulesModel
 import fr.husi.ui.dashboard.ConnectionDetailState
 import fr.husi.ui.dashboard.ProxyItem
 import fr.husi.ui.dashboard.ProxySet
+import fr.husi.ui.dashboard.SmartConnectionInfo
 import kotlin.math.roundToLong
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CancellationException
@@ -24,6 +25,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
@@ -44,6 +46,8 @@ internal class ClashSession(
     val rules = ClashRulesModel(api)
 
     private var closed = false
+    private var smartWeightsUnsupported = false
+    private var lastSmartWeights: Map<String, List<ClashSmartNodeRank>> = emptyMap()
     private val history = ArrayDeque<Float>()
     private val connectionTracker = ClashConnectionTracker()
 
@@ -53,66 +57,91 @@ internal class ClashSession(
         check(version.isNotBlank()) { "Missing Clash version" }
     }
 
-    override suspend fun observe(intervals: Flow<Int>) =
+    override suspend fun observe(
+        intervals: Flow<Int>,
+        subscriptions: Flow<Set<RemoteSubscription>>,
+    ) =
         supervisorScope {
-            watch(this, ClashStreams.logs) { message ->
-                val level = when (val value = message.level.uppercase()) {
-                    "WARNING" -> "WARN"
-                    "SILENT" -> "FATAL"
-                    else -> value
-                }
+            observeWhile(subscriptions.map { RemoteSubscription.LOGS in it }) {
+                watch(this, ClashStreams.logs) { message ->
+                    val level = when (val value = message.level.uppercase()) {
+                        "WARNING" -> "WARN"
+                        "SILENT" -> "FATAL"
+                        else -> value
+                    }
 
-                logs.add(RemoteLogEntry(level, message.message))
-                while (logs.size > 2000) {
-                    logs.removeAt(0)
-                }
-            }
-
-            launch {
-                intervals.collectLatest { interval ->
-                    coroutineScope {
-                        if (interval <= 0) return@coroutineScope
-
-                        watch(this, ClashStreams.traffic, interval) { sample ->
-                            val up = sample.up
-                            val down = sample.down
-
-                            history.addLast((up + down).toFloat())
-                            while (history.size > 60) {
-                                history.removeFirst()
-                            }
-
-                            dashboard = dashboard.copy(
-                                txRateProxy = up,
-                                rxRateProxy = down,
-                                proxySpeedHistory = history.toList(),
-                            )
-                        }
-
-                        watch(this, ClashStreams.connections, interval) { snapshot ->
-                            dashboard =
-                                dashboard.copy(
-                                    txTotal = snapshot.uploadTotal,
-                                    rxTotal = snapshot.downloadTotal,
-                                    connections = connectionTracker.apply(snapshot, nowMillis().toLong()),
-                                    activeConnectionCount = snapshot.connections.size,
-                                    memoryAvailable = dashboard.memoryAvailable || snapshot.memory != null,
-                                    memory = snapshot.memory ?: dashboard.memory,
-                                )
-                        }
-
-                        watch(this, ClashStreams.memory, interval) {
-                            dashboard = dashboard.copy(
-                                memory = it.inuse,
-                                memoryAvailable = true,
-                            )
-                        }
+                    logs.add(RemoteLogEntry(level, message.message))
+                    while (logs.size > 2000) {
+                        logs.removeAt(0)
                     }
                 }
             }
 
-            poll(this, "proxies", ::refreshProxies)
-            poll(this, "config", ::refreshConfig)
+            observeWhile(subscriptions.map { RemoteSubscription.STATS in it }) {
+                launch {
+                    intervals.collectLatest { interval ->
+                        if (interval <= 0) return@collectLatest
+                        coroutineScope {
+                            watch(this, ClashStreams.traffic, interval) { sample ->
+                                val up = sample.up
+                                val down = sample.down
+
+                                history.addLast((up + down).toFloat())
+                                while (history.size > 60) {
+                                    history.removeFirst()
+                                }
+
+                                dashboard = dashboard.copy(
+                                    txRateProxy = up,
+                                    rxRateProxy = down,
+                                    proxySpeedHistory = history.toList(),
+                                )
+                            }
+
+                            watch(this, ClashStreams.memory, interval) {
+                                dashboard = dashboard.copy(
+                                    memory = it.inuse,
+                                    memoryAvailable = true,
+                                )
+                            }
+                        }
+                    }
+                }
+
+                poll(this, "config", ::refreshConfig)
+            }
+
+            observeWhile(
+                subscriptions.map {
+                    RemoteSubscription.STATS in it || RemoteSubscription.CONNECTIONS in it
+                },
+            ) {
+                try {
+                    intervals.collectLatest { interval ->
+                        if (interval <= 0) return@collectLatest
+                        coroutineScope {
+                            watch(this, ClashStreams.connections, interval) { snapshot ->
+                                dashboard =
+                                    dashboard.copy(
+                                        txTotal = snapshot.uploadTotal,
+                                        rxTotal = snapshot.downloadTotal,
+                                        connections = connectionTracker.apply(snapshot, nowMillis().toLong()),
+                                        activeConnectionCount = snapshot.connections.size,
+                                        memoryAvailable = dashboard.memoryAvailable || snapshot.memory != null,
+                                        memory = snapshot.memory ?: dashboard.memory,
+                                    )
+                            }
+                        }
+                    }
+                } finally {
+                    connectionTracker.clear()
+                    dashboard = dashboard.copy(connections = emptyList())
+                }
+            }
+
+            observeWhile(subscriptions.map { RemoteSubscription.PROXY_SET in it }) {
+                poll(this, "proxies", ::refreshProxies)
+            }
 
             try {
                 while (isActive) {
@@ -173,22 +202,58 @@ internal class ClashSession(
         }
     }
 
-    private suspend fun refreshProxies() {
+    internal suspend fun refreshProxies() {
         val proxies = api.request(ClashRequests.proxies)
+        currentCoroutineContext().ensureActive()
+        if (closed) return
+
+        val hasSmartGroups = proxies.values.any { it.isSmartGroup }
+        val weights = if (hasSmartGroups && !smartWeightsUnsupported) {
+            try {
+                api.request(ClashRequests.smartWeights).weights.also {
+                    lastSmartWeights = it
+                }
+            } catch (failure: Exception) {
+                if (failure is CancellationException) throw failure
+                Logs.w("Clash smart weights refresh failed", failure)
+                if (failure is ClashApiException && failure.unsupported) {
+                    smartWeightsUnsupported = true
+                    lastSmartWeights = emptyMap()
+                    emptyMap()
+                } else {
+                    lastSmartWeights
+                }
+            }
+        } else {
+            emptyMap()
+        }
         currentCoroutineContext().ensureActive()
         if (closed) return
 
         dashboard = dashboard.copy(
             proxySets = proxies.mapNotNull { (name, proxy) ->
                 val members = proxy.members ?: return@mapNotNull null
+                val ranksByNode = if (proxy.isSmartGroup) {
+                    weights[name]?.associateBy { it.name }.orEmpty()
+                } else {
+                    emptyMap()
+                }
                 ProxySet(
                     tag = name,
                     displayType = proxy.type,
                     selected = proxy.selected,
+                    fixed = proxy.fixed,
                     selectable = proxy.selectable,
                     items = members.map { tag ->
                         val item = proxies[tag]
-                        ProxyItem(tag = tag, type = item?.type.orEmpty(), urlTestDelay = item?.delay ?: -1)
+                        val rank = ranksByNode[tag]
+                        ProxyItem(
+                            tag = tag,
+                            type = item?.type.orEmpty(),
+                            urlTestDelay = item?.delay ?: -1,
+                            smartRank = rank?.rank.orEmpty(),
+                            smartWeight = rank?.weight,
+                        )
                     },
                 )
             },
@@ -205,6 +270,11 @@ internal class ClashSession(
 
     override suspend fun select(group: String, name: String) {
         api.request(ClashRequests.select(group, name))
+        refreshProxies()
+    }
+
+    override suspend fun clearFixed(group: String) {
+        api.request(ClashRequests.clearFixed(group))
         refreshProxies()
     }
 
@@ -231,6 +301,10 @@ internal class ClashSession(
 
     override suspend fun closeConnection(id: String) {
         api.request(ClashRequests.closeConnection(id))
+    }
+
+    override suspend fun blockSmartConnection(id: String) {
+        api.request(ClashRequests.blockSmartConnection(id))
     }
 
     override suspend fun closeConnections() {
@@ -300,6 +374,17 @@ internal class ClashConnectionTracker {
                 outbound = chain.firstOrNull().orEmpty(),
                 chain = chain.joinToString(" => "),
                 processes = metadata.processPath.blankAsNull()?.let(::listOf),
+                smart = if (connection.isSmart) {
+                    SmartConnectionInfo(
+                        blockState = metadata.smartBlock,
+                        target = metadata.smartTarget,
+                        wildcardTarget = metadata.wildcardTarget,
+                        exitGeoIP = metadata.exitGeoIP,
+                        exitIPASN = metadata.exitIPASN,
+                    )
+                } else {
+                    null
+                },
             )
             active[id] = upload to download
         }
@@ -322,6 +407,12 @@ internal class ClashConnectionTracker {
         sampledAt = now
         previous = active
         return records.values.toList()
+    }
+
+    fun clear() {
+        sampledAt = null
+        previous = emptyMap()
+        records.clear()
     }
 }
 

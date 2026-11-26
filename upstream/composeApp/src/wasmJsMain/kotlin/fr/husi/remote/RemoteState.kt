@@ -14,9 +14,13 @@ import fr.husi.proto.daemon.OpenConnectStatusUpdate
 import fr.husi.proto.daemon.OpenVPNStatusUpdate
 import fr.husi.proto.daemon.StartedServiceClient
 import fr.husi.proto.daemon.TailscaleStatusUpdate
+import fr.husi.tailscale.TailscaleEndpointState
+import fr.husi.tailscale.toTailscaleEndpoints
 import fr.husi.ui.dashboard.DashboardState
 import fr.husi.ui.openconnect.RemoteOpenConnectActions
 import fr.husi.ui.openvpn.RemoteOpenVPNActions
+import fr.husi.vpn.OpenConnectEndpointState
+import fr.husi.vpn.OpenVPNEndpointState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -25,6 +29,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
@@ -44,6 +49,16 @@ internal class RemoteState(
 ) {
     val openConnectActions = RemoteOpenConnectActions(this)
     val openVPNActions = RemoteOpenVPNActions(this)
+    val tailscaleEndpoints: StateFlow<List<TailscaleEndpointState>>
+        field = MutableStateFlow(emptyList())
+    val activeNativeServer: StateFlow<RemoteServer?>
+        field = MutableStateFlow(null)
+    val liveTailscaleEndpoints: StateFlow<List<TailscaleEndpointState>?>
+        field = MutableStateFlow(null)
+    val liveOpenConnectEndpoints: StateFlow<List<OpenConnectEndpointState>?>
+        field = MutableStateFlow(null)
+    val liveOpenVPNEndpoints: StateFlow<List<OpenVPNEndpointState>?>
+        field = MutableStateFlow(null)
     val servers = mutableStateListOf<RemoteServer>()
     var initialized by mutableStateOf(false)
         private set
@@ -108,6 +123,8 @@ internal class RemoteState(
     private var session: Job? = null
     private var generation = 0
     private val replacementState = MutableStateFlow<ReplacementState>(ReplacementState.Idle)
+    private val subscriptionCounts = mutableMapOf<RemoteSubscription, Int>()
+    private val activeSubscriptions = MutableStateFlow<Set<RemoteSubscription>>(emptySet())
     val detector = BackendDetector(client, openClash)
 
     private companion object {
@@ -215,7 +232,28 @@ internal class RemoteState(
         }
     }
 
-    private fun stopSession() {
+    fun retainSubscription(subscription: RemoteSubscription): () -> Unit {
+        val current = subscriptionCounts[subscription] ?: 0
+        subscriptionCounts[subscription] = current + 1
+        if (current == 0) {
+            activeSubscriptions.value = subscriptionCounts.keys.toSet()
+        }
+        var released = false
+        return {
+            if (!released) {
+                released = true
+                val remaining = (subscriptionCounts[subscription] ?: 0) - 1
+                if (remaining <= 0) {
+                    subscriptionCounts.remove(subscription)
+                    activeSubscriptions.value = subscriptionCounts.keys.toSet()
+                } else {
+                    subscriptionCounts[subscription] = remaining
+                }
+            }
+        }
+    }
+
+    private fun stopSession(preserveServerContext: Boolean = false) {
         session?.cancel()
         session = null
         selected = null
@@ -223,6 +261,10 @@ internal class RemoteState(
         connecting = false
         error = ""
         clearConnection()
+        if (!preserveServerContext) {
+            resetServerContext()
+            activeNativeServer.value = null
+        }
     }
 
     private fun clearConnection() {
@@ -231,13 +273,24 @@ internal class RemoteState(
         currentSession?.close() ?: client.close()
         currentSession = null
         connected = false
+        tailscaleEndpoints.value = emptyList()
         openConnectActions.update(OpenConnectStatusUpdate())
         openVPNActions.update(OpenVPNStatusUpdate())
     }
 
+    private fun resetServerContext() {
+        openConnectActions.clearDismissed()
+        openVPNActions.clearDismissed()
+        liveTailscaleEndpoints.value = null
+        liveOpenConnectEndpoints.value = null
+        liveOpenVPNEndpoints.value = null
+    }
+
     private fun startSession(server: RemoteServer) {
-        stopSession()
+        val sameEndpoint = selected?.sameEndpointAs(server) == true
+        stopSession(preserveServerContext = sameEndpoint)
         selected = server
+        activeNativeServer.value = if (server.backend == RemoteBackend.CLASH) null else server
         connecting = true
         error = ""
         session = scope.launch {
@@ -256,16 +309,34 @@ internal class RemoteState(
                     val opened =
                         when (backend) {
                             RemoteBackend.CLASH -> {
+                                resetServerContext()
+                                activeNativeServer.value = null
                                 ClashSession(server.url, server.secret, openClash(server.url, server.secret))
                             }
 
-                            else ->
-                                SingBoxSession(client) {
-                                    if (currentSession === it) {
-                                        openConnectActions.update(it.openConnect)
-                                        openVPNActions.update(it.openVPN)
-                                    }
-                                }
+                            else -> {
+                                activeNativeServer.value = server
+                                SingBoxSession(
+                                    client = client,
+                                    onTailscaleUpdate = { session, update ->
+                                        if (currentSession === session) {
+                                            val mapped = update.toTailscaleEndpoints()
+                                            tailscaleEndpoints.value = mapped
+                                            liveTailscaleEndpoints.value = mapped
+                                        }
+                                    },
+                                    onOpenConnectUpdate = { session, update ->
+                                        if (currentSession === session) {
+                                            liveOpenConnectEndpoints.value = openConnectActions.update(update)
+                                        }
+                                    },
+                                    onOpenVPNUpdate = { session, update ->
+                                        if (currentSession === session) {
+                                            liveOpenVPNEndpoints.value = openVPNActions.update(update)
+                                        }
+                                    },
+                                )
+                            }
                         }
                     currentSession = opened
                     opened.connect(server.url, server.secret)
@@ -275,7 +346,7 @@ internal class RemoteState(
                     connecting = false
                     error = ""
                     retryDelay = INITIAL_RETRY_DELAY
-                    opened.observe(speedInterval)
+                    opened.observe(speedInterval, activeSubscriptions)
                 } catch (failure: Exception) {
                     if (failure is CancellationException) throw failure
                     ensureActive()
@@ -331,4 +402,7 @@ internal class RemoteState(
             Logs.w("Remote authentication action failed", failure)
             failure.message ?: failure.toString()
         }
+
+    private fun RemoteServer.sameEndpointAs(other: RemoteServer): Boolean =
+        id == other.id && url == other.url && secret == other.secret && backend == other.backend
 }

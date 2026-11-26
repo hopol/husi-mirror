@@ -2,6 +2,17 @@
 
 Read [docs/code-style.md](./docs/code-style.md) before writing code. For full release packaging and cross-compilation details, see [docs/build.md](./docs/build.md).
 
+## Hard rule: do not touch the real environment
+
+- Never connect to, start, stop, restart, install, or reconfigure the user's real Husi daemon.
+- Never change the host's system proxy, network settings (including TUN and routes), system
+  services, or real Husi configuration and data.
+- Before running the app, scripts, or tests, verify that they cannot reach the real daemon or
+  modify host settings or data. A temporary app data directory alone is insufficient. This rule
+  applies to all commands below, including `make test`, `make test_gradle`, and `make desktop`.
+- Run verification that needs a live app or service only in an isolated environment with its
+  own services and settings. When isolation cannot be established, use static checks only.
+
 ## Tools & commands
 
 ### Build and test through the Makefile
@@ -133,7 +144,7 @@ The default address is `http://127.0.0.1:9090`, with no secret
 
 ### Android two-process model
 
-The app runs in two processes: UI and `:bg`. Only `:bg` loads libcore (`Seq.setContext`, `Libcore.initCore`, `boxService.start()`); the UI process must not touch any `fr.husi.libcore` class, and reaches Go the way the desktop does, through `CoreClient`. The binder (`SagerConnection`) is lifecycle-only — `BIND_AUTO_CREATE` starts/keeps `:bg` alive; the data plane is gRPC over `<filesDir>/api.sock`. Main-process work that no activity covers (WorkManager updates) uses `withBackgroundProcess` for core calls. App HTTP and WebDAV use OkHttp in the calling process. The Android app uses the binder for initial certificate export and for local age decryption.
+The app runs in two processes: UI and `:bg`. Only `:bg` loads libcore (`Seq.setContext`, `Libcore.initCore`, `boxService.start()`); the UI process must not touch any `fr.husi.libcore` class, and reaches Go the way the desktop does, through `CoreClient`. The binder (`SagerConnection`) is lifecycle-only — `BIND_AUTO_CREATE` starts/keeps `:bg` alive; the data plane is gRPC over `<filesDir>/api.sock`. Main-process work that no activity covers (WorkManager updates) uses `withBackgroundProcess` for core calls. App HTTP and WebDAV use OkHttp in the calling process. The Android app uses the binder for initial certificate export. Subscription age decryption uses yan in the calling process.
 
 ### Desktop core host
 

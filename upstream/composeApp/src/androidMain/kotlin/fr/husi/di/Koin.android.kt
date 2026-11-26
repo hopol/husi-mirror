@@ -8,15 +8,17 @@ import fr.husi.compose.material3.standardPlatformMaterialApi
 import fr.husi.compose.theme.PlatformThemeApi
 import fr.husi.compose.theme.TvPlatformThemeApi
 import fr.husi.compose.theme.standardPlatformThemeApi
+import fr.husi.database.DataStore
+import fr.husi.net.canUseHttpEngineForCert
+import fr.husi.net.createHttpEngineCallFactory
+import fr.husi.net.isHttpEngineSupported
 import fr.husi.repository.AndroidRepository
 import fr.husi.repository.LocalRepository
 import fr.husi.repository.resolveRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.emitAll
-import kotlinx.coroutines.flow.flow
+import okhttp3.Call
 import org.koin.core.module.Module
 import org.koin.dsl.module
 
@@ -55,9 +57,20 @@ internal actual fun platformKoinModules(): List<Module> = listOf(androidNavigati
 
 internal actual suspend fun prepareHttpRoots() = withBackgroundProcess {}
 
-internal actual fun <T> withAgeCore(decrypt: () -> Flow<T>): Flow<T> = flow {
-    withBackgroundProcess {
-        emitAll(decrypt())
+internal actual fun platformDirectCallFactory(repository: LocalRepository): suspend (isHttps: Boolean) -> Call.Factory? {
+    if (!isHttpEngineSupported()) {
+        return { null }
+    }
+    val context = (repository as AndroidRepository).context
+    val factory by lazy { createHttpEngineCallFactory(context) }
+    return { isHttps ->
+        if (!isHttps
+            || canUseHttpEngineForCert(DataStore.certProvider.get(), DataStore.httpEngineAllowSystemCert.get())
+        ) {
+            factory
+        } else {
+            null
+        }
     }
 }
 

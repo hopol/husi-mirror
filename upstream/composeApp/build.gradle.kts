@@ -459,6 +459,7 @@ kotlin {
                 implementation(libs.filekit.dialogs.compose)
                 implementation(libs.zxing.core)
                 implementation(libs.kpuri)
+                implementation(libs.yan)
                 implementation(project(":library:DragDropSwipeLazyColumn"))
 
             }
@@ -473,7 +474,7 @@ kotlin {
                 )
 
                 implementation(libs.kotlinx.coroutines.android)
-                implementation(libs.conscrypt.android)
+                implementation(libs.bctls)
 
                 implementation(libs.androidx.appcompat)
                 implementation(libs.androidx.work.multiprocess)
@@ -518,6 +519,9 @@ kotlin {
         }
         val desktopMain = getByName("desktopMain") {
             kotlin.srcDir(generateDesktopPlatformInfo)
+            if (desktopTarget.platform == DesktopPlatform.Windows) {
+                resources.srcDir("src/desktopMain/windowsResources")
+            }
             dependencies {
                 if (requestedDesktopTarget == null) {
                     implementation(compose.desktop.currentOs)
@@ -615,6 +619,9 @@ val mergeDesktopAboutLibraries = tasks.register<Sync>("mergeDesktopAboutLibrarie
     description = "Merges shared and desktop-only AboutLibraries presets."
     from(commonAboutLibrariesDir)
     from(desktopAboutLibrariesDir)
+    if (desktopTarget.platform == DesktopPlatform.Windows) {
+        from(layout.projectDirectory.dir("src/desktopMain/windowsAboutLibraries"))
+    }
     into(desktopAboutLibrariesConfig)
 }
 
@@ -662,11 +669,16 @@ dependencies {
 
 tasks.matching { it.name == "packageReleaseUberJarForCurrentOS" }.configureEach {
     if (this is Jar) {
+        // Signatures of input JARs are invalid after shrinking and repackaging.
         exclude(
             "META-INF/maven/**",
             "META-INF/native-image/**",
             "META-INF/proguard/**",
             "META-INF/com.android.tools/**",
+            "META-INF/*.SF",
+            "META-INF/*.RSA",
+            "META-INF/*.DSA",
+            "META-INF/*.EC",
         )
 
         // Exclude non-target native binaries from dependency family buckets.

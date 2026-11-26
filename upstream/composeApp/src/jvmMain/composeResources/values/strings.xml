@@ -236,6 +236,7 @@
     <string name="group_type">Group Type</string>
     <string name="subscription_type">Subscription Type</string>
     <string name="age_identity">age identity</string>
+    <string name="age_identity_invalid">Enter valid age secret keys, one per line.</string>
     <string name="force_resolve">Force Resolve</string>
     <string name="force_resolve_sum">Resolve all domain names to IP addresses when updating. Host and SNI will be automatically appended if possible</string>
     <string name="deduplication_sum">Remove duplicate configurations when updating</string>
@@ -300,6 +301,15 @@
     <string name="backup_groups_and_configurations">Groups and configurations</string>
     <string name="backup_rules">Routing rules</string>
     <string name="backup_summary">If the routing settings are not backed up with configurations, then custom outbounds will be lost.</string>
+    <string name="backup_age_recipient">age public key</string>
+    <string name="backup_age_recipient_optional">Leave blank to create an unencrypted backup.</string>
+    <string name="backup_age_recipient_invalid">Enter one valid age public key.</string>
+    <string name="backup_age_private_key">age private key</string>
+    <string name="backup_age_identity_invalid">Enter one valid age secret key.</string>
+    <string name="backup_age_armor">ASCII armor</string>
+    <string name="backup_age_restore_title">Decrypt backup</string>
+    <string name="backup_age_no_matching_identity">This age identity cannot decrypt this backup.</string>
+    <string name="backup_age_decrypt_failed">Could not read the encrypted backup.</string>
     <string name="webdav" translatable="false">WebDAV</string>
     <string name="webdav_configure">Configure</string>
     <string name="webdav_directory_url">Directory URL</string>
@@ -503,11 +513,7 @@
     <string name="plugin_not_installed_summary">Tap to open the download page</string>
     <string name="traffic_pattern">Traffic Pattern</string>
     <string name="route_invert">Invert Match</string>
-    <string name="openconnect_authentication">OpenConnect Authentication</string>
-    <string name="openvpn_authentication">OpenVPN Authentication</string>
     <string name="clear_remembered_authentication_answers">Clear remembered authentication answers</string>
-    <string name="later">Later</string>
-    <string name="auth_verifying">Verifying…</string>
     <string name="auth_later_hint">You can finish authentication later from Dashboard → Status.</string>
     <string name="app_update_settings">App Update</string>
     <string name="app_update_available">Version %1$s is available</string>
@@ -517,11 +523,6 @@
     <string name="app_update_installing">Installing…</string>
     <string name="app_update_install_failed">Install failed: %1$s</string>
     <string name="app_update_no_matching_asset">No package matches this device. Open the release page to download it manually.</string>
-    <string name="tailscale_with_tag" translatable="false">Tailscale: %1$s</string>
-    <plurals name="taildrop_received_notification">
-        <item quantity="one">Received %1$d file</item>
-        <item quantity="other">Received %1$d files</item>
-    </plurals>
     <string name="taildrop_open_directory">Open receive directory</string>
     <string name="taildrop_open_download_directory">Open downloaded files</string>
     <string name="taildrop_no_targets">No devices can receive files</string>
